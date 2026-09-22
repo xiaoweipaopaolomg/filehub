@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-04: Epoll Event Loop</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .warning { border: 2px solid #000; padding: 10px 14px; margin: 14px 0; page-break-inside: avoid; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-04: Epoll Event Loop</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-01–03 &nbsp;|&nbsp; Difficulty: Hard &nbsp;|&nbsp; Estimated: 7–12 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Replace the blocking single-connection accept loop with a non-blocking, edge-triggered epoll event loop. The server must handle many concurrent connections without blocking on any individual client.</p>
+
+<div class="warning">
+  <strong>⚠ This is the hardest TRD.</strong> Budget extra time. Bugs in the event loop are intermittent and difficult to reproduce. Use <code>strace</code> heavily — it shows exactly which syscalls the server is making and where it blocks.
+</div>
+
+
+<h2>Technical Requirements</h2>
+
+<h3>R1 — Non-Blocking Sockets</h3>
+<p>Set <code>O_NONBLOCK</code> on the listen socket and every accepted client socket using <code>fcntl()</code> (or <code>accept4()</code> with <code>SOCK_NONBLOCK</code>).</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Epoll Setup</h3>
+<p>Create an epoll instance with <code>epoll_create1(0)</code>. Register the listen socket for <code>EPOLLIN | EPOLLET</code>.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R3 — Event Loop</h3>
+<p>Replace the accept loop with an <code>epoll_wait()</code> loop. Dispatch events by fd type: listen socket events call the accept handler, client socket events call the connection handler.</p>
+
+<h3>R4 — Edge-Triggered Accept</h3>
+<p>When the listen socket fires <code>EPOLLIN</code>, call <code>accept()</code> in a loop until <code>EAGAIN</code>. For each accepted fd: set non-blocking, allocate a <code>connection_t</code>, register with epoll for <code>EPOLLIN | EPOLLET</code>.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R5 — Per-Connection State</h3>
+<p>Define a <code>connection_t</code> struct with: fd, state enum (<code>CONN_READING</code>, <code>CONN_WRITING</code>, <code>CONN_DONE</code>), read buffer + length, write buffer + total length + offset. Store a pointer to it in <code>epoll_event.data.ptr</code>.</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R6 — Read Handling</h3>
+<p>On <code>EPOLLIN</code> for a client: read in a loop until <code>EAGAIN</code>, appending to the connection's read buffer. After each read, check for <code>\r\n\r\n</code>. When found: parse the request (TRD-01), build the response (TRD-02/03), serialize into the connection's write buffer, transition to <code>CONN_WRITING</code>, and register for <code>EPOLLOUT | EPOLLET</code>.</p>
+<span class="hint-ref">Stuck? → Hints H4</span>
+
+<h3>R7 — Write Handling</h3>
+<p>On <code>EPOLLOUT</code>: write in a loop from <code>write_buf + write_offset</code> until all bytes are sent or <code>EAGAIN</code>. Track progress with <code>write_offset</code>. When <code>write_offset == write_len</code>: transition to <code>CONN_DONE</code>, remove from epoll, close the fd, free the connection.</p>
+<span class="hint-ref">Stuck? → Hints H5</span>
+
+<h3>R8 — Connection Cleanup</h3>
+<p>On <code>EPOLLERR</code>, <code>EPOLLHUP</code>, or any read/write error: remove from epoll, close the fd, free the <code>connection_t</code> and any owned buffers. No crashes, no leaked fds.</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with strict flags</td><td>T1</td></tr>
+  <tr><td>2</td><td>Basic request/response still works (regression)</td><td>T2–T4</td></tr>
+  <tr><td>3</td><td>10 concurrent connections all return 200</td><td>T5</td></tr>
+  <tr><td>4</td><td>50 rapid sequential connections succeed</td><td>T6</td></tr>
+  <tr><td>5</td><td>Large file (256 KB) served with correct Content-Length</td><td>T7</td></tr>
+  <tr><td>6</td><td>Slow client does not block fast client</td><td>T8</td></tr>
+  <tr><td>7</td><td>No fd leaks after many connections</td><td>T9</td></tr>
+  <tr><td>8</td><td>Concurrent requests for different files</td><td>T10</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>What happens if you call <code>read()</code> only once per <code>EPOLLIN</code> event in edge-triggered mode?</li>
+  <li>Why must the listen socket's accept handler also loop until <code>EAGAIN</code>?</li>
+  <li>Explain the difference between storing <code>fd</code> vs. a <code>connection_t *</code> pointer in <code>epoll_event.data</code>. Why is the pointer approach better?</li>
+  <li>What is the purpose of <code>write_offset</code> and what bug does it prevent?</li>
+  <li>Why can't the event loop call <code>sleep()</code>, <code>scanf()</code>, or any other blocking function?</li>
+</ol>
+
+
+<h2>Preview: TRD-05</h2>
+<p>Currently, request processing (parsing, file reading, response building) happens on the event loop thread. If file I/O blocks (large file, slow disk), the entire event loop stalls. TRD-05 moves processing to a thread pool: the event loop dispatches completed requests to worker threads, and workers call <code>response_send()</code> or enqueue the response for the event loop to flush.</p>
+
+
+<div class="footer">
+  Conduit TRD-04 &nbsp;|&nbsp; Epoll Event Loop &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

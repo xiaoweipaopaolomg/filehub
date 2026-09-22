@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-01 Prior Knowledge: HTTP Request Parsing</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block {
+    border-bottom: 3px solid #000;
+    padding-bottom: 14px;
+    margin-bottom: 28px;
+  }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+
+  h2 {
+    font-size: 14pt;
+    margin-top: 28px;
+    margin-bottom: 6px;
+    padding-bottom: 3px;
+    border-bottom: 1.5px solid #000;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+
+  pre {
+    border: 1.5px solid #000;
+    padding: 10px 12px;
+    margin: 10px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 9pt;
+    line-height: 1.45;
+    background: #fff;
+    color: #000;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .diagram { border: 1.5px solid #000; padding: 14px; margin: 14px 0; text-align: center; page-break-inside: avoid; }
+  .diagram-caption { font-size: 8.5pt; font-style: italic; text-align: center; margin-top: 6px; }
+
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-01 Prior Knowledge</h1>
+  <div class="subtitle">HTTP Request Parsing — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-00 complete (TCP accept loop with hardcoded response)</div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<h2>1 &nbsp; Anatomy of an HTTP/1.1 Request</h2>
+
+<p>An HTTP request is a structured text message sent over the TCP byte stream established in TRD-00. It has three parts:</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 660 220" xmlns="http://www.w3.org/2000/svg" font-family="'Courier New', monospace" font-size="10">
+    <!-- Request line -->
+    <rect x="20" y="15" width="620" height="30" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="30" y="35" font-size="11" font-weight="bold">GET /index.html HTTP/1.1\r\n</text>
+    <text x="500" y="35" font-family="Georgia, serif" font-size="9" font-style="italic">← Request Line</text>
+
+    <!-- Headers -->
+    <rect x="20" y="50" width="620" height="80" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="30" y="70">Host: localhost:9876\r\n</text>
+    <text x="30" y="87">User-Agent: curl/7.88\r\n</text>
+    <text x="30" y="104">Accept: */*\r\n</text>
+    <text x="30" y="121">Connection: close\r\n</text>
+    <text x="500" y="88" font-family="Georgia, serif" font-size="9" font-style="italic">← Headers</text>
+
+    <!-- Blank line -->
+    <rect x="20" y="135" width="620" height="25" fill="none" stroke="#000" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="30" y="152" font-weight="bold">\r\n</text>
+    <text x="500" y="152" font-family="Georgia, serif" font-size="9" font-style="italic">← Blank line (end of headers)</text>
+
+    <!-- Body -->
+    <rect x="20" y="165" width="620" height="35" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="30" y="187">(empty for GET requests)</text>
+    <text x="500" y="187" font-family="Georgia, serif" font-size="9" font-style="italic">← Body (optional)</text>
+
+    <!-- Brace annotation -->
+    <text x="10" y="97" font-family="Georgia, serif" font-size="26">}</text>
+  </svg>
+  <div class="diagram-caption">Figure 1 — Structure of an HTTP/1.1 request as raw bytes on the wire</div>
+</div>
+
+<h3>1.1 &nbsp; The Request Line</h3>
+<p>The first line is always: <code>METHOD SP URI SP VERSION CRLF</code> where SP is a single space character (0x20) and CRLF is <code>\r\n</code> (bytes 0x0D 0x0A). For TRD-01, the only method that must be accepted is <code>GET</code>. The only version that must be accepted is <code>HTTP/1.1</code>.</p>
+
+<p>Parsing this line means extracting three strings: the method, the URI path, and the version. If any piece is missing or the version string is wrong, the request is malformed.</p>
+
+<h3>1.2 &nbsp; Headers</h3>
+<p>After the request line, zero or more headers follow. Each header is: <code>Key: Value\r\n</code>. The key and value are separated by a colon, optionally followed by whitespace. Headers end when a bare <code>\r\n</code> appears on its own — making the full terminator sequence <code>\r\n\r\n</code> (the last header's CRLF plus the blank line's CRLF).</p>
+
+<p>For TRD-01, headers must be parsed and stored, but their values don't need to influence behavior yet (no routing based on <code>Host</code>, no <code>Content-Length</code> body reading). They just need to be correctly extracted into a data structure.</p>
+
+<h3>1.3 &nbsp; The \r\n\r\n Sentinel</h3>
+<p>Detecting <code>\r\n\r\n</code> in the receive buffer is how the server knows the complete header block has arrived. This is the most important parsing operation in TRD-01. Until this sequence is found, the server has not received a complete request and must continue reading.</p>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>2 &nbsp; TCP Is a Stream, Not Messages</h2>
+
+<p>This was mentioned in TRD-00's Prior Knowledge, but it becomes critical now. A single <code>read()</code> call on a TCP socket is <strong>not guaranteed</strong> to return one complete HTTP request. Three scenarios:</p>
+
+<table>
+  <tr>
+    <th style="width:160px;">Scenario</th>
+    <th>What happens</th>
+    <th style="width:170px;">What the server must do</th>
+  </tr>
+  <tr>
+    <td>Complete request in one read</td>
+    <td>Buffer contains everything up to and including <code>\r\n\r\n</code></td>
+    <td>Parse immediately</td>
+  </tr>
+  <tr>
+    <td>Partial request</td>
+    <td>Buffer has the start of the request but no <code>\r\n\r\n</code> yet</td>
+    <td>Keep buffer contents, <code>read()</code> again, append to buffer</td>
+  </tr>
+  <tr>
+    <td>Multiple requests in one read</td>
+    <td>Buffer contains more than one full request (pipelining)</td>
+    <td>Not required for TRD-01 — handle one request per connection</td>
+  </tr>
+</table>
+
+<p>The partial-read case is the one that matters. The implementation pattern is: maintain a buffer and an offset tracking how many bytes have been received, call <code>read()</code> in a loop, and after each read check whether <code>\r\n\r\n</code> has appeared in the accumulated buffer.</p>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>3 &nbsp; C String Parsing Toolkit</h2>
+
+<p>There are several approaches to parsing the request line and headers in C. None is "correct" — pick the one that makes sense.</p>
+
+<table>
+  <tr>
+    <th style="width:130px;">Function</th>
+    <th>Use for</th>
+    <th>Watch out for</th>
+  </tr>
+  <tr>
+    <td><code>strstr()</code></td>
+    <td>Finding <code>\r\n\r\n</code> in the buffer</td>
+    <td>Returns NULL if not found — always check</td>
+  </tr>
+  <tr>
+    <td><code>strtok_r()</code></td>
+    <td>Splitting the request line by spaces</td>
+    <td>Use <code>_r</code> (reentrant), not <code>strtok()</code> — the non-reentrant version uses global state and will break in TRD-05 with threads</td>
+  </tr>
+  <tr>
+    <td><code>sscanf()</code></td>
+    <td>Extracting method, path, version from request line</td>
+    <td>Check the return value (number of fields matched)</td>
+  </tr>
+  <tr>
+    <td><code>strchr()</code></td>
+    <td>Finding the colon separator in header lines</td>
+    <td>Headers can have colons in their values (e.g., <code>Host: localhost:9876</code>)</td>
+  </tr>
+  <tr>
+    <td>Manual pointer arithmetic</td>
+    <td>Walking through the buffer byte by byte</td>
+    <td>Off-by-one errors, null terminator placement</td>
+  </tr>
+</table>
+
+<div class="callout">
+  <strong>Key decision:</strong> The receive buffer from <code>read()</code> is <strong>not</strong> null-terminated. Before using any <code>str*()</code> function, you must either null-terminate the buffer at the number of bytes received, or use <code>memchr()</code>/<code>memmem()</code> which operate on counted bytes rather than C strings.
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>4 &nbsp; Struct Design</h2>
+
+<p>The parsed request needs a home. A typical approach:</p>
+
+<pre>typedef struct {
+    char method[8];          /* "GET", "POST", etc. */
+    char path[1024];         /* "/index.html" */
+    char version[16];        /* "HTTP/1.1" */
+    struct {
+        char key[256];
+        char value[512];
+    } headers[32];
+    int header_count;
+} http_request_t;</pre>
+
+<p>Fixed-size buffers are fine for TRD-01. The sizes above are reasonable defaults. Dynamic allocation adds complexity with no learning payoff at this stage — save that for TRD-03.</p>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>5 &nbsp; Status Codes for TRD-01</h2>
+
+<table>
+  <tr><th style="width:60px;">Code</th><th style="width:160px;">Reason Phrase</th><th>When to return</th></tr>
+  <tr><td>200</td><td>OK</td><td>Valid GET request to a known path (<code>/</code>)</td></tr>
+  <tr><td>400</td><td>Bad Request</td><td>Malformed request line, missing fields, unsupported HTTP version</td></tr>
+  <tr><td>404</td><td>Not Found</td><td>Valid GET request to an unknown path</td></tr>
+  <tr><td>405</td><td>Method Not Allowed</td><td>Non-GET method (POST, DELETE, PUT, etc.)</td></tr>
+</table>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>6 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Primary</div>
+  <ul>
+    <li><strong>RFC 9112 §2–3</strong> — HTTP/1.1 message format. The authoritative spec for request line and header syntax. <a href="https://www.rfc-editor.org/rfc/rfc9112#section-2">rfc-editor.org/rfc/rfc9112</a></li>
+    <li><strong>RFC 9110 §9</strong> — Method definitions and semantics. <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9">rfc-editor.org/rfc/rfc9110</a></li>
+    <li><strong>Beej's Guide §7</strong> — Advanced techniques: partial <code>recv()</code>, buffer accumulation. <a href="https://beej.us/guide/bgnet/html/#advanced-techniques">beej.us/guide/bgnet</a></li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Man Pages</div>
+  <ul>
+    <li><code>man 3 strstr</code>, <code>man 3 strtok_r</code>, <code>man 3 sscanf</code>, <code>man 3 strchr</code></li>
+    <li><code>man 3 memchr</code> — byte-counted search (no null-terminator required)</li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Supplementary</div>
+  <ul>
+    <li><strong>Julia Evans — HTTP request format</strong> — Visual one-page breakdown. <a href="https://wizardzines.com">wizardzines.com</a></li>
+    <li><strong>curl -v</strong> — Shows the exact bytes your client sends and the server's response. The single best debugging tool for this TRD.</li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-01 Prior Knowledge &nbsp;|&nbsp; HTTP Request Parsing &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

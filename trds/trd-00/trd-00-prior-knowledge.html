@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-00 Prior Knowledge: TCP &amp; POSIX Sockets</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #000; background: #fff; max-width: 800px; margin: 0 auto; padding: 40px 30px; }
+  h1 { font-size: 20pt; margin-bottom: 6px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+  .subtitle { font-size: 10pt; margin-bottom: 30px; font-style: italic; color: #000; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 4px; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 6px; }
+  p { margin-bottom: 10px; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+  pre { border: 2px solid #000; padding: 12px 14px; margin: 12px 0; font-family: 'Courier New', monospace; font-size: 9.5pt; line-height: 1.5; background: #fff; color: #000; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9.5pt; color: #000; }
+  ul, ol { margin: 8px 0 10px 24px; }
+  li { margin-bottom: 4px; }
+  a { color: #000; text-decoration: underline; }
+  .resource-box { border: 1px solid #000; padding: 10px 14px; margin: 10px 0; }
+  .resource-box p { margin-bottom: 4px; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; font-weight: bold; }
+  hr { border: none; border-top: 1px solid #000; margin: 24px 0; }
+  .comment { font-size: 9pt; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<h1>TRD-00 Prior Knowledge</h1>
+<div class="subtitle">TCP &amp; POSIX Sockets — Conduit HTTP Server Project</div>
+
+<p>This document covers foundational concepts needed before or during TRD-00 implementation. It's not a tutorial — it's a map. Read enough to orient, then learn the rest by writing code and hitting walls.</p>
+
+<hr>
+
+<h2>1. The TCP/IP Mental Model</h2>
+
+<p>Conduit is a server. It sits and waits for other programs (clients) to initiate a conversation. TCP provides the rules: a reliable, ordered, byte-stream connection between two endpoints.</p>
+
+<p>The key thing to internalize: <strong>TCP has no concept of "messages."</strong> It's a stream of bytes. HTTP imposes message structure on top of that stream (headers, body, Content-Length). At TRD-00, there's no need to care about HTTP structure yet — just read some bytes and write some bytes. But awareness of this distinction matters, because it will bite hard in TRD-01 when determining where one HTTP message ends and another begins.</p>
+
+<p><strong>The connection lifecycle from the server's perspective:</strong></p>
+<ol>
+  <li>Create a socket (a file descriptor the OS uses to track network state)</li>
+  <li>Bind that socket to an address + port ("I own port 9876")</li>
+  <li>Listen, telling the OS to queue incoming connections</li>
+  <li>Accept a connection from the queue, getting a <em>new</em> file descriptor for that specific client</li>
+  <li>Read from / write to that client FD</li>
+  <li>Close the client FD</li>
+</ol>
+
+<p>This is the <code>socket → bind → listen → accept → read/write → close</code> pipeline. Every networked C program follows this pattern or some variation of it.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong>Beej's Guide to Network Programming</strong> — The single best resource for POSIX socket programming in C. Chapters 1–6 cover the full foundation for TRD-00. Not optional.<br>
+  <a href="https://beej.us/guide/bgnet/html/">https://beej.us/guide/bgnet/html/</a></p>
+  <p><strong>man pages</strong> — The ground truth for every syscall: <code>man 2 socket</code>, <code>man 2 bind</code>, <code>man 2 listen</code>, <code>man 2 accept</code>, <code>man 2 read</code>, <code>man 2 write</code>, <code>man 2 close</code>, <code>man 2 setsockopt</code>.<br>
+  <a href="https://man7.org/linux/man-pages/man2/socket.2.html">https://man7.org/linux/man-pages/man2/socket.2.html</a></p>
+</div>
+
+<hr>
+
+<h2>2. File Descriptors — The UNIX Abstraction</h2>
+
+<p>In UNIX/Linux, <strong>everything is a file.</strong> A socket is a file. A pipe is a file. <code>/dev/null</code> is a file. The OS returns an integer — a file descriptor (FD) — used to interact with these things through a uniform interface (<code>read()</code>, <code>write()</code>, <code>close()</code>).</p>
+
+<p>Calling <code>socket()</code> returns an FD for the listening socket. Calling <code>accept()</code> returns a <em>different</em> FD for each connected client. Forgetting to <code>close()</code> a client FD leaks it. The OS has a per-process FD limit (usually 1024 by default). Leak enough FDs and the server silently stops accepting new connections.</p>
+
+<p><strong>Key concept — the two FDs:</strong></p>
+<pre>listening_fd = socket(...)   -- Lives for the lifetime of the server
+client_fd    = accept(...)   -- New one per connection. Close it when done.</pre>
+
+<p>This distinction trips up beginners. Never read from or write to the listening FD. It's a doorway. The client FD is the actual conversation.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong>File descriptor overview:</strong> <a href="https://man7.org/linux/man-pages/man2/open.2.html">man 2 open</a> (the concepts section)</p>
+  <p><strong><code>ulimit -n</code></strong> — Run in terminal to see the per-process FD limit. Defaults to 1024 on most Linux systems.</p>
+</div>
+
+<hr>
+
+<h2>3. The <code>struct sockaddr_in</code> Dance</h2>
+
+<p>To bind a socket to an address, fill out a <code>struct sockaddr_in</code> and pass it to <code>bind()</code>. This struct tells the OS: "Listen on this IP, on this port."</p>
+
+<p>The annoying parts:</p>
+<ul>
+  <li><strong><code>htons()</code> (host-to-network short):</strong> Network protocols use big-endian byte order. Most machines use little-endian. <code>htons()</code> converts a port number to network byte order. Forget it and the socket binds to a garbage port.</li>
+  <li><strong><code>INADDR_ANY</code>:</strong> Means "listen on all network interfaces." Standard for dev servers.</li>
+  <li><strong>Casting:</strong> <code>bind()</code> takes a <code>struct sockaddr *</code>, but the code fills out a <code>struct sockaddr_in</code>. Cast the pointer. This is one of C's ugly corners — accept it and move on.</li>
+</ul>
+
+<p>The typical setup:</p>
+<pre>struct sockaddr_in addr;
+memset(&amp;addr, 0, sizeof(addr));        // zero the struct
+addr.sin_family = AF_INET;             // IPv4
+addr.sin_addr.s_addr = INADDR_ANY;     // all interfaces
+addr.sin_port = htons(port);           // port, byte-swapped</pre>
+
+<p>Don't memorize this. Understand what each line does, then copy it from prior code every time.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong>Beej's Guide, section 5.1</strong> — struct explanations: <a href="https://beej.us/guide/bgnet/html/#structs">https://beej.us/guide/bgnet/html/#structs</a></p>
+  <p><strong><code>man 7 ip</code></strong> — Documents <code>struct sockaddr_in</code>: <a href="https://man7.org/linux/man-pages/man7/ip.7.html">https://man7.org/linux/man-pages/man7/ip.7.html</a></p>
+</div>
+
+<hr>
+
+<h2>4. <code>SO_REUSEADDR</code> — Why It's Needed</h2>
+
+<p>When a TCP connection closes, the OS puts the port into a <code>TIME_WAIT</code> state for typically 60 seconds. This prevents stale packets from a previous connection being misinterpreted as belonging to a new one.</p>
+
+<p>The side effect: killing and immediately restarting the server causes <code>bind()</code> to fail with <code>EADDRINUSE</code> ("Address already in use") because the port is still in <code>TIME_WAIT</code>.</p>
+
+<p><code>setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, ...)</code> tells the OS: "The port might be in TIME_WAIT. Allow binding anyway." Safe for development and standard practice for servers.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong>SO_REUSEADDR in Beej's Guide:</strong> <a href="https://beej.us/guide/bgnet/html/#setsockoptman">https://beej.us/guide/bgnet/html/#setsockoptman</a></p>
+  <p><strong>TIME_WAIT deep dive:</strong> <a href="https://vincent.bernat.ch/en/blog/2014-tcp-time-wait-state-linux">https://vincent.bernat.ch/en/blog/2014-tcp-time-wait-state-linux</a> (not required for TRD-00)</p>
+</div>
+
+<hr>
+
+<h2>5. <code>listen()</code> Backlog</h2>
+
+<p><code>listen(fd, backlog)</code> marks the socket as passive (willing to accept incoming connections) and sets the size of the <strong>connection queue.</strong></p>
+
+<p>When a client does a TCP handshake, the kernel completes it and puts the connection into a queue. <code>accept()</code> pulls connections out. The backlog parameter hints at maximum queue length.</p>
+
+<p>If the queue fills up (because <code>accept()</code> is called too slowly), new clients get refused or retry. For TRD-00 with a single-threaded sequential server, a backlog of 128 is more than enough. This becomes important in TRD-04/05 with epoll and a thread pool.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong><code>man 2 listen</code>:</strong> <a href="https://man7.org/linux/man-pages/man2/listen.2.html">https://man7.org/linux/man-pages/man2/listen.2.html</a></p>
+  <p><strong>TCP backlog deep dive (Cloudflare):</strong> <a href="https://blog.cloudflare.com/syn-packet-handling-in-the-wild/">https://blog.cloudflare.com/syn-packet-handling-in-the-wild/</a></p>
+</div>
+
+<hr>
+
+<h2>6. HTTP/1.1 at the Byte Level</h2>
+
+<p>TRD-00 doesn't parse HTTP. But it <em>writes</em> an HTTP response, so the byte-level structure matters.</p>
+
+<p>An HTTP response on the wire:</p>
+<pre>HTTP/1.1 200 OK\r\n
+Header-Name: header-value\r\n
+Another-Header: value\r\n
+\r\n
+[body bytes]</pre>
+
+<p>Key points:</p>
+<ul>
+  <li>Every line ends with <code>\r\n</code> (CRLF — bytes <code>0x0D 0x0A</code>). Not just <code>\n</code>. Specified in RFC 7230.</li>
+  <li>Headers end with a blank line: <code>\r\n\r\n</code>. This double-CRLF signals the client that body is starting.</li>
+  <li><code>Content-Length</code> tells the client exactly how many bytes the body is. Wrong value = client hangs or truncates.</li>
+  <li><code>Connection: close</code> tells the client not to reuse the connection. Simplifies TRD-00.</li>
+</ul>
+
+<h3>Byte counting the TRD-00 body</h3>
+
+<p>The body: <code>Conduit is alive — TRD00</code></p>
+<ul>
+  <li>"Conduit is alive " = 17 bytes (ASCII, 1 byte each, including trailing space)</li>
+  <li>"—" = 3 bytes (UTF-8 encoding of U+2014 EM DASH: <code>0xE2 0x80 0x94</code>)</li>
+  <li>" TRD00" = 6 bytes (space + 5 ASCII chars)</li>
+  <li>Total: 17 + 3 + 6 = <strong>26 bytes</strong></li>
+</ul>
+
+<div class="callout">Never trust documentation blindly. Count bytes independently. Use <code>echo -n "your string" | wc -c</code> in the terminal to verify. In production, a wrong Content-Length causes real outages.</div>
+
+<hr>
+
+<h2>7. Error Handling in C — The <code>perror()</code> Pattern</h2>
+
+<p>Every syscall in TRD-00 can fail. In C, these functions return <code>-1</code> on failure and set the global <code>errno</code> variable.</p>
+
+<p>The standard pattern:</p>
+<pre>if (bind(fd, (struct sockaddr *)&amp;addr, sizeof(addr)) == -1) {
+    perror("bind");   // prints "bind: [human-readable error]"
+    close(fd);
+    exit(EXIT_FAILURE);
+}</pre>
+
+<p><code>perror()</code> reads <code>errno</code> and prints the corresponding message. Use it for every syscall. Check return values. Print with <code>perror()</code>. Exit or continue as appropriate.</p>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong><code>man 3 perror</code>:</strong> <a href="https://man7.org/linux/man-pages/man3/perror.3.html">https://man7.org/linux/man-pages/man3/perror.3.html</a></p>
+  <p><strong><code>man 3 errno</code>:</strong> <a href="https://man7.org/linux/man-pages/man3/errno.3.html">https://man7.org/linux/man-pages/man3/errno.3.html</a></p>
+</div>
+
+<hr>
+
+<h2>8. C Compilation Flags</h2>
+
+<p>Required: <code>gcc -Wall -Wextra -Werror -std=c11 -o conduit conduit.c</code></p>
+
+<ul>
+  <li><strong><code>-Wall</code></strong>: Most common warnings (unused variables, implicit declarations, etc.)</li>
+  <li><strong><code>-Wextra</code></strong>: Additional warnings beyond <code>-Wall</code> (unused parameters, sign comparison, etc.)</li>
+  <li><strong><code>-Werror</code></strong>: Every warning becomes a compilation error. Build fails on a single warning.</li>
+  <li><strong><code>-std=c11</code></strong>: Use the C11 standard.</li>
+</ul>
+
+<p>This is strict on purpose. Serious systems shops compile with at least <code>-Wall -Werror</code>. Writing warning-free C from the start prevents sloppy habits.</p>
+
+<hr>
+
+<h2>9. Debugging Tools</h2>
+
+<ul>
+  <li><strong><code>curl</code></strong> — Primary HTTP client for testing. <code>curl -v http://localhost:9876/</code> shows request and response headers. The <code>-v</code> flag is critical.</li>
+  <li><strong><code>nc</code> (netcat)</strong> — Raw TCP client. Useful for edge cases curl won't create.</li>
+  <li><strong><code>strace</code></strong> — Traces every syscall. <code>strace ./conduit 9876</code> shows exactly what happens. Invaluable when the server "hangs."</li>
+  <li><strong><code>lsof -i :9876</code></strong> — Shows what process uses a port. Useful for <code>EADDRINUSE</code> errors.</li>
+  <li><strong><code>xxd</code></strong> — Hex dump tool. Essential for Content-Length mismatches and encoding issues.</li>
+</ul>
+
+<div class="resource-box">
+  <p><strong>Resources</strong></p>
+  <p><strong>strace tutorial (Julia Evans):</strong> <a href="https://jvns.ca/blog/2015/04/14/strace-zine/">https://jvns.ca/blog/2015/04/14/strace-zine/</a></p>
+</div>
+
+<hr>
+
+<h2>Recommended Reading Order</h2>
+
+<ol>
+  <li><strong>Beej's Guide, Chapters 1–6</strong> — Do this first. Skim Chapter 1, read 2–6 carefully.</li>
+  <li><strong>Man pages for each syscall</strong> as they're used. Read the RETURN VALUE and ERRORS sections.</li>
+  <li><strong>Cloudflare TCP backlog post</strong> — After finishing TRD-00, before TRD-01.</li>
+  <li><strong>Julia Evans' strace zine</strong> — When hitting the first confusing bug.</li>
+</ol>
+
+<p>Don't read all of this before writing code. Read Beej chapters 2–5, then start coding. When stuck, come back and follow the relevant link.</p>
+
+</body>
+</html>

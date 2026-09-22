@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-01 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-01 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push &nbsp;|&nbsp; Try Level 1 for 15+ minutes before escalating</div>
+</div>
+
+
+<!-- ═══════ H1 ═══════ -->
+<h2>H1 — Request Struct Design (R1)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Think about what fields the rest of the code needs to access after parsing. The method determines the response logic. The path determines what to serve. The version determines validity. Headers are key-value pairs with an unknown (but bounded) count. Start with fixed-size character arrays — dynamic allocation is not needed yet.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>Use <code>char method[8]</code>, <code>char path[1024]</code>, <code>char version[16]</code>. For headers, use a struct array: <code>struct { char key[256]; char value[512]; } headers[32]</code> and an <code>int header_count</code>. Initialize <code>header_count</code> to 0 before parsing. These sizes are generous — a real production server would be more careful, but correctness is the goal now.</p>
+</div>
+
+
+<!-- ═══════ H2 ═══════ -->
+<h2>H2 — Request Line Parsing (R2)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>The request line ends at the first <code>\r\n</code>. Isolate that line first, then split it into three parts. There should be exactly three space-separated tokens. If there aren't three, it's malformed.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>One approach: use <code>strstr(buf, "\r\n")</code> to find the end of the first line. Null-terminate there temporarily. Then use <code>sscanf(line, "%7s %1023s %15s", req.method, req.path, req.version)</code> — the return value tells you how many fields matched. If it's not 3, return 400. Then validate <code>strcmp(req.version, "HTTP/1.1") == 0</code>. If not, return 400.</p>
+</div>
+
+
+<!-- ═══════ H3 ═══════ -->
+<h2>H3 — Header Parsing (R3)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>After the request line, each header occupies one line (terminated by <code>\r\n</code>). The key and value are separated by the <strong>first</strong> colon — not just any colon. Think about <code>Host: localhost:9876</code>.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>Walk a pointer from the end of the request line. For each line: find the next <code>\r\n</code>, that's the end of this header. Within that line, find the first <code>:</code> using <code>strchr()</code>. Everything before the colon is the key; everything after (skip optional leading whitespace) is the value. Copy both into <code>headers[header_count]</code> and increment. Stop when you hit a line that's just <code>\r\n</code>.</p>
+</div>
+
+
+<!-- ═══════ H4 ═══════ -->
+<h2>H4 — End-of-Headers Detection / Partial Reads (R4)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Your <code>read()</code> call should be inside a loop. Each iteration appends to the buffer. After each append, call <code>strstr(buffer, "\r\n\r\n")</code>. If it returns non-NULL, the full header block has arrived and you can parse. If NULL, keep reading.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>Pseudocode for the read loop:</p>
+<pre>char buf[4096];
+int total = 0;
+while (total &lt; sizeof(buf) - 1) {
+    int n = read(client_fd, buf + total, sizeof(buf) - 1 - total);
+    if (n &lt;= 0) break;
+    total += n;
+    buf[total] = '\0';
+    if (strstr(buf, "\r\n\r\n")) break;
+}</pre>
+  <p>The <code>-1</code> reserves space for the null terminator. If the loop exits without finding <code>\r\n\r\n</code>, the request is either incomplete (client disconnected) or oversized — both can be treated as bad requests for now.</p>
+</div>
+
+
+<!-- ═══════ H5 ═══════ -->
+<h2>H5 — Status Code Routing (R5)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Think about the order of checks. Some conditions should be checked before others. A malformed request line should be caught before you check the method or path. A wrong method should be caught before you check the path.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>Evaluation order: (1) Did the request line parse into three valid fields? No → 400. (2) Is the version <code>HTTP/1.1</code>? No → 400. (3) Is the method <code>GET</code>? No → 405. (4) Is the path <code>/</code>? No → 404. (5) Everything valid → 200.</p>
+</div>
+
+
+<!-- ═══════ H6 ═══════ -->
+<h2>H6 — Response Construction (R6)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Build the response as a single string using <code>snprintf()</code>. Status line first, then headers, then <code>\r\n</code>, then body. Compute the body length before building the response so you can set <code>Content-Length</code> accurately. Remember: bytes, not characters.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>const char *body = "Conduit is alive";
+int body_len = strlen(body);
+char resp[4096];
+int resp_len = snprintf(resp, sizeof(resp),
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/plain\r\n"
+    "Content-Length: %d\r\n"
+    "\r\n"
+    "%s",
+    body_len, body);
+write(client_fd, resp, resp_len);</pre>
+  <p>For error responses, follow the same pattern but change the status line and body. A 404 response still needs valid headers and a body (even if the body is just "Not Found").</p>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-01 Hints &nbsp;|&nbsp; HTTP/1.1 Request Parsing &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

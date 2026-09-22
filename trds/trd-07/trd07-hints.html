@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-07 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-07 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push</div>
+</div>
+
+
+<h2>H1 — Running <code>wrk</code> Benchmarks (D1)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Run wrk 4 times, increasing <code>-c</code> each time: 1, 10, 50, 100. Use 2 threads (<code>-t2</code>) and 10-second duration (<code>-d10s</code>). The target URL should be a real file in the docroot, not just <code>/</code> — use <code>/index.html</code> so the full file-serving path is exercised. Do a 5-second warm-up run first that you discard.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre># Warm up (discard)
+wrk -t2 -c10 -d5s http://localhost:9876/index.html > /dev/null
+
+# Record benchmarks
+for CONNS in 1 10 50 100; do
+    echo "=== Concurrency: $CONNS ==="
+    wrk -t2 -c$CONNS -d10s --latency http://localhost:9876/index.html
+    echo ""
+done</pre>
+  <p>The <code>--latency</code> flag adds percentile breakdown (p50, p75, p90, p99). Extract these for the README table. Run each 3 times and take the median req/sec and p99 values.</p>
+</div>
+
+
+<h2>H2 — Valgrind Memcheck (D3)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Start the server under valgrind, send requests that exercise all code paths (200, 404, 405, 400, large file), then send SIGTERM and read valgrind's output. The key line is "definitely lost" — it must be 0. "Still reachable" is usually fine at process exit.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre># Terminal 1: start under valgrind
+valgrind --leak-check=full --show-leak-kinds=all \
+    ./conduit 9876 ./docroot 2> valgrind_out.txt &
+VG_PID=$!
+sleep 2  # valgrind startup is slow
+
+# Terminal 2: exercise all code paths
+curl -s http://localhost:9876/
+curl -s http://localhost:9876/nonexistent
+curl -s -X POST http://localhost:9876/
+echo -ne "GARBAGE\r\n\r\n" | nc -w 1 localhost 9876
+curl -s http://localhost:9876/index.html
+
+# Graceful shutdown
+kill -TERM $VG_PID
+wait $VG_PID 2>/dev/null || true
+
+# Check results
+grep "definitely lost" valgrind_out.txt</pre>
+  <p>If "definitely lost" is non-zero, valgrind shows the allocation stack trace. Work backwards from there to find the missing <code>free()</code>.</p>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-07 Hints &nbsp;|&nbsp; Benchmarking &amp; Documentation &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

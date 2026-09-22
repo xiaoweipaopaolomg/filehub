@@ -1,0 +1,975 @@
+{
+  "duration_seconds": 126.024,
+  "requested_duration_seconds": 120,
+  "clients": 12,
+  "counts": {
+    "full_download": 103444,
+    "fragmented": 51546,
+    "early_disconnect": 51518,
+    "range_download": 51439,
+    "status": 51556
+  },
+  "total_operations": 309503,
+  "errors": [],
+  "samples": [
+    {
+      "elapsed_seconds": 1.217,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 12,
+      "total_requests": 1482,
+      "bytes_sent": 814118477
+    },
+    {
+      "elapsed_seconds": 2.237,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 7,
+      "total_requests": 2849,
+      "bytes_sent": 1683686176
+    },
+    {
+      "elapsed_seconds": 3.256,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 8,
+      "total_requests": 4208,
+      "bytes_sent": 2524931407
+    },
+    {
+      "elapsed_seconds": 4.262,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 7,
+      "total_requests": 5527,
+      "bytes_sent": 3296669203
+    },
+    {
+      "elapsed_seconds": 5.273,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 6,
+      "total_requests": 6927,
+      "bytes_sent": 4113148796
+    },
+    {
+      "elapsed_seconds": 6.286,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 8192,
+      "bytes_sent": 4858191300
+    },
+    {
+      "elapsed_seconds": 7.294,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 8,
+      "total_requests": 9523,
+      "bytes_sent": 5571636674
+    },
+    {
+      "elapsed_seconds": 8.31,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 8,
+      "total_requests": 10840,
+      "bytes_sent": 6403032765
+    },
+    {
+      "elapsed_seconds": 9.319,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 6,
+      "total_requests": 12236,
+      "bytes_sent": 7207381750
+    },
+    {
+      "elapsed_seconds": 10.333,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 9,
+      "total_requests": 13639,
+      "bytes_sent": 8011931716
+    },
+    {
+      "elapsed_seconds": 11.35,
+      "rss_kb": 2424,
+      "fd_count": 21,
+      "active_connections": 10,
+      "total_requests": 14938,
+      "bytes_sent": 8830969837
+    },
+    {
+      "elapsed_seconds": 12.386,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 10,
+      "total_requests": 16300,
+      "bytes_sent": 9663618214
+    },
+    {
+      "elapsed_seconds": 13.404,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 4,
+      "total_requests": 17726,
+      "bytes_sent": 10461008749
+    },
+    {
+      "elapsed_seconds": 14.417,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 8,
+      "total_requests": 19161,
+      "bytes_sent": 11300723517
+    },
+    {
+      "elapsed_seconds": 15.433,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 8,
+      "total_requests": 20965,
+      "bytes_sent": 12415926332
+    },
+    {
+      "elapsed_seconds": 16.441,
+      "rss_kb": 2424,
+      "fd_count": 23,
+      "active_connections": 7,
+      "total_requests": 22852,
+      "bytes_sent": 13527936415
+    },
+    {
+      "elapsed_seconds": 17.454,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 7,
+      "total_requests": 24756,
+      "bytes_sent": 14653595310
+    },
+    {
+      "elapsed_seconds": 18.458,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 8,
+      "total_requests": 26753,
+      "bytes_sent": 15850342419
+    },
+    {
+      "elapsed_seconds": 19.464,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 10,
+      "total_requests": 28818,
+      "bytes_sent": 17028938820
+    },
+    {
+      "elapsed_seconds": 20.47,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 5,
+      "total_requests": 31065,
+      "bytes_sent": 18304799091
+    },
+    {
+      "elapsed_seconds": 21.476,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 5,
+      "total_requests": 33320,
+      "bytes_sent": 19568170609
+    },
+    {
+      "elapsed_seconds": 22.482,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 2,
+      "total_requests": 36021,
+      "bytes_sent": 21005953094
+    },
+    {
+      "elapsed_seconds": 23.487,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 38606,
+      "bytes_sent": 22435253505
+    },
+    {
+      "elapsed_seconds": 24.494,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 8,
+      "total_requests": 41374,
+      "bytes_sent": 24022571221
+    },
+    {
+      "elapsed_seconds": 25.498,
+      "rss_kb": 2424,
+      "fd_count": 11,
+      "active_connections": 4,
+      "total_requests": 44141,
+      "bytes_sent": 25573209924
+    },
+    {
+      "elapsed_seconds": 26.501,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 6,
+      "total_requests": 47151,
+      "bytes_sent": 27325563340
+    },
+    {
+      "elapsed_seconds": 27.508,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 4,
+      "total_requests": 49944,
+      "bytes_sent": 28907692299
+    },
+    {
+      "elapsed_seconds": 28.516,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 5,
+      "total_requests": 52883,
+      "bytes_sent": 30625269193
+    },
+    {
+      "elapsed_seconds": 29.522,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 10,
+      "total_requests": 55814,
+      "bytes_sent": 32261618335
+    },
+    {
+      "elapsed_seconds": 30.527,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 6,
+      "total_requests": 58610,
+      "bytes_sent": 33931090955
+    },
+    {
+      "elapsed_seconds": 31.532,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 7,
+      "total_requests": 61494,
+      "bytes_sent": 35585410250
+    },
+    {
+      "elapsed_seconds": 32.534,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 8,
+      "total_requests": 64230,
+      "bytes_sent": 37219463064
+    },
+    {
+      "elapsed_seconds": 33.539,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 11,
+      "total_requests": 67146,
+      "bytes_sent": 38918475745
+    },
+    {
+      "elapsed_seconds": 34.548,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 8,
+      "total_requests": 69923,
+      "bytes_sent": 40499438809
+    },
+    {
+      "elapsed_seconds": 35.555,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 7,
+      "total_requests": 72668,
+      "bytes_sent": 42070161293
+    },
+    {
+      "elapsed_seconds": 36.558,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 7,
+      "total_requests": 75606,
+      "bytes_sent": 43753435059
+    },
+    {
+      "elapsed_seconds": 37.564,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 6,
+      "total_requests": 78408,
+      "bytes_sent": 45411004044
+    },
+    {
+      "elapsed_seconds": 38.565,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 9,
+      "total_requests": 81315,
+      "bytes_sent": 47045998032
+    },
+    {
+      "elapsed_seconds": 39.568,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 8,
+      "total_requests": 84145,
+      "bytes_sent": 48799887125
+    },
+    {
+      "elapsed_seconds": 40.572,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 5,
+      "total_requests": 86845,
+      "bytes_sent": 50445052496
+    },
+    {
+      "elapsed_seconds": 41.574,
+      "rss_kb": 2424,
+      "fd_count": 11,
+      "active_connections": 7,
+      "total_requests": 89642,
+      "bytes_sent": 51960821061
+    },
+    {
+      "elapsed_seconds": 42.576,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 11,
+      "total_requests": 92443,
+      "bytes_sent": 53446685750
+    },
+    {
+      "elapsed_seconds": 43.587,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 7,
+      "total_requests": 95261,
+      "bytes_sent": 55160630468
+    },
+    {
+      "elapsed_seconds": 44.592,
+      "rss_kb": 2424,
+      "fd_count": 10,
+      "active_connections": 7,
+      "total_requests": 98059,
+      "bytes_sent": 56745530033
+    },
+    {
+      "elapsed_seconds": 45.597,
+      "rss_kb": 2424,
+      "fd_count": 11,
+      "active_connections": 10,
+      "total_requests": 100733,
+      "bytes_sent": 58331557266
+    },
+    {
+      "elapsed_seconds": 46.604,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 9,
+      "total_requests": 103358,
+      "bytes_sent": 59779977790
+    },
+    {
+      "elapsed_seconds": 47.607,
+      "rss_kb": 2424,
+      "fd_count": 21,
+      "active_connections": 8,
+      "total_requests": 106156,
+      "bytes_sent": 61436944740
+    },
+    {
+      "elapsed_seconds": 48.613,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 10,
+      "total_requests": 108935,
+      "bytes_sent": 63023185698
+    },
+    {
+      "elapsed_seconds": 49.619,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 111712,
+      "bytes_sent": 64571643016
+    },
+    {
+      "elapsed_seconds": 50.624,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 4,
+      "total_requests": 114588,
+      "bytes_sent": 66236082725
+    },
+    {
+      "elapsed_seconds": 51.628,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 10,
+      "total_requests": 117448,
+      "bytes_sent": 67942285611
+    },
+    {
+      "elapsed_seconds": 52.632,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 7,
+      "total_requests": 120188,
+      "bytes_sent": 69565307459
+    },
+    {
+      "elapsed_seconds": 53.64,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 122925,
+      "bytes_sent": 70993587258
+    },
+    {
+      "elapsed_seconds": 54.647,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 10,
+      "total_requests": 125750,
+      "bytes_sent": 72691291418
+    },
+    {
+      "elapsed_seconds": 55.651,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 8,
+      "total_requests": 128645,
+      "bytes_sent": 74416691365
+    },
+    {
+      "elapsed_seconds": 56.654,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 7,
+      "total_requests": 131385,
+      "bytes_sent": 75946631728
+    },
+    {
+      "elapsed_seconds": 57.656,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 6,
+      "total_requests": 134003,
+      "bytes_sent": 77437238602
+    },
+    {
+      "elapsed_seconds": 58.658,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 6,
+      "total_requests": 136917,
+      "bytes_sent": 79178839646
+    },
+    {
+      "elapsed_seconds": 59.664,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 8,
+      "total_requests": 139576,
+      "bytes_sent": 80719236547
+    },
+    {
+      "elapsed_seconds": 60.667,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 7,
+      "total_requests": 142359,
+      "bytes_sent": 82212169173
+    },
+    {
+      "elapsed_seconds": 61.672,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 5,
+      "total_requests": 145152,
+      "bytes_sent": 84009080251
+    },
+    {
+      "elapsed_seconds": 62.676,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 10,
+      "total_requests": 147831,
+      "bytes_sent": 85504053756
+    },
+    {
+      "elapsed_seconds": 63.683,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 8,
+      "total_requests": 150609,
+      "bytes_sent": 87174147224
+    },
+    {
+      "elapsed_seconds": 64.689,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 5,
+      "total_requests": 153261,
+      "bytes_sent": 88765049737
+    },
+    {
+      "elapsed_seconds": 65.696,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 8,
+      "total_requests": 155595,
+      "bytes_sent": 90173706501
+    },
+    {
+      "elapsed_seconds": 66.701,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 7,
+      "total_requests": 158296,
+      "bytes_sent": 91778639466
+    },
+    {
+      "elapsed_seconds": 67.711,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 8,
+      "total_requests": 161142,
+      "bytes_sent": 93489033358
+    },
+    {
+      "elapsed_seconds": 68.718,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 164002,
+      "bytes_sent": 95168164807
+    },
+    {
+      "elapsed_seconds": 69.725,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 7,
+      "total_requests": 166957,
+      "bytes_sent": 97013521348
+    },
+    {
+      "elapsed_seconds": 70.729,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 6,
+      "total_requests": 169925,
+      "bytes_sent": 98808615867
+    },
+    {
+      "elapsed_seconds": 71.74,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 4,
+      "total_requests": 172793,
+      "bytes_sent": 100438445067
+    },
+    {
+      "elapsed_seconds": 72.747,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 8,
+      "total_requests": 175563,
+      "bytes_sent": 102028235918
+    },
+    {
+      "elapsed_seconds": 73.753,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 7,
+      "total_requests": 178290,
+      "bytes_sent": 103714766826
+    },
+    {
+      "elapsed_seconds": 74.759,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 12,
+      "total_requests": 181125,
+      "bytes_sent": 105304648749
+    },
+    {
+      "elapsed_seconds": 75.764,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 6,
+      "total_requests": 183931,
+      "bytes_sent": 106976354191
+    },
+    {
+      "elapsed_seconds": 76.769,
+      "rss_kb": 2424,
+      "fd_count": 22,
+      "active_connections": 7,
+      "total_requests": 186752,
+      "bytes_sent": 108593783314
+    },
+    {
+      "elapsed_seconds": 77.782,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 6,
+      "total_requests": 189656,
+      "bytes_sent": 110167917696
+    },
+    {
+      "elapsed_seconds": 78.788,
+      "rss_kb": 2424,
+      "fd_count": 23,
+      "active_connections": 5,
+      "total_requests": 192524,
+      "bytes_sent": 111669371194
+    },
+    {
+      "elapsed_seconds": 79.793,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 7,
+      "total_requests": 195437,
+      "bytes_sent": 113415006208
+    },
+    {
+      "elapsed_seconds": 80.797,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 8,
+      "total_requests": 198436,
+      "bytes_sent": 115196078424
+    },
+    {
+      "elapsed_seconds": 81.803,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 10,
+      "total_requests": 201414,
+      "bytes_sent": 116896638940
+    },
+    {
+      "elapsed_seconds": 82.811,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 13,
+      "total_requests": 204283,
+      "bytes_sent": 118538471671
+    },
+    {
+      "elapsed_seconds": 83.816,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 8,
+      "total_requests": 207001,
+      "bytes_sent": 119943418319
+    },
+    {
+      "elapsed_seconds": 84.824,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 4,
+      "total_requests": 209869,
+      "bytes_sent": 121547343944
+    },
+    {
+      "elapsed_seconds": 85.828,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 6,
+      "total_requests": 212769,
+      "bytes_sent": 123289769628
+    },
+    {
+      "elapsed_seconds": 86.833,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 6,
+      "total_requests": 215571,
+      "bytes_sent": 124978416579
+    },
+    {
+      "elapsed_seconds": 87.84,
+      "rss_kb": 2424,
+      "fd_count": 21,
+      "active_connections": 9,
+      "total_requests": 218517,
+      "bytes_sent": 126638306308
+    },
+    {
+      "elapsed_seconds": 88.846,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 221379,
+      "bytes_sent": 128289518267
+    },
+    {
+      "elapsed_seconds": 89.85,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 7,
+      "total_requests": 224343,
+      "bytes_sent": 130105553249
+    },
+    {
+      "elapsed_seconds": 90.853,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 7,
+      "total_requests": 227230,
+      "bytes_sent": 131790857775
+    },
+    {
+      "elapsed_seconds": 91.861,
+      "rss_kb": 2424,
+      "fd_count": 18,
+      "active_connections": 10,
+      "total_requests": 229997,
+      "bytes_sent": 133459205542
+    },
+    {
+      "elapsed_seconds": 92.865,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 7,
+      "total_requests": 232807,
+      "bytes_sent": 135155261092
+    },
+    {
+      "elapsed_seconds": 93.866,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 3,
+      "total_requests": 235635,
+      "bytes_sent": 136799666775
+    },
+    {
+      "elapsed_seconds": 94.872,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 238424,
+      "bytes_sent": 138485326111
+    },
+    {
+      "elapsed_seconds": 95.876,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 6,
+      "total_requests": 241286,
+      "bytes_sent": 140223460486
+    },
+    {
+      "elapsed_seconds": 96.879,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 11,
+      "total_requests": 244099,
+      "bytes_sent": 141819198035
+    },
+    {
+      "elapsed_seconds": 97.882,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 5,
+      "total_requests": 246973,
+      "bytes_sent": 143525217517
+    },
+    {
+      "elapsed_seconds": 98.887,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 9,
+      "total_requests": 249889,
+      "bytes_sent": 145319988065
+    },
+    {
+      "elapsed_seconds": 99.89,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 7,
+      "total_requests": 252785,
+      "bytes_sent": 146942496607
+    },
+    {
+      "elapsed_seconds": 100.892,
+      "rss_kb": 2424,
+      "fd_count": 11,
+      "active_connections": 4,
+      "total_requests": 255634,
+      "bytes_sent": 148646438609
+    },
+    {
+      "elapsed_seconds": 101.897,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 8,
+      "total_requests": 258484,
+      "bytes_sent": 150306885242
+    },
+    {
+      "elapsed_seconds": 102.901,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 6,
+      "total_requests": 261476,
+      "bytes_sent": 152048929298
+    },
+    {
+      "elapsed_seconds": 103.906,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 8,
+      "total_requests": 264315,
+      "bytes_sent": 153734420085
+    },
+    {
+      "elapsed_seconds": 104.909,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 6,
+      "total_requests": 267265,
+      "bytes_sent": 155442698039
+    },
+    {
+      "elapsed_seconds": 105.914,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 270182,
+      "bytes_sent": 157155670969
+    },
+    {
+      "elapsed_seconds": 106.921,
+      "rss_kb": 2424,
+      "fd_count": 13,
+      "active_connections": 8,
+      "total_requests": 272769,
+      "bytes_sent": 158587118781
+    },
+    {
+      "elapsed_seconds": 107.927,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 7,
+      "total_requests": 275591,
+      "bytes_sent": 160248869235
+    },
+    {
+      "elapsed_seconds": 108.934,
+      "rss_kb": 2424,
+      "fd_count": 12,
+      "active_connections": 7,
+      "total_requests": 278353,
+      "bytes_sent": 161756298482
+    },
+    {
+      "elapsed_seconds": 109.938,
+      "rss_kb": 2424,
+      "fd_count": 19,
+      "active_connections": 4,
+      "total_requests": 281397,
+      "bytes_sent": 163499391578
+    },
+    {
+      "elapsed_seconds": 110.944,
+      "rss_kb": 2424,
+      "fd_count": 20,
+      "active_connections": 7,
+      "total_requests": 284396,
+      "bytes_sent": 165225325430
+    },
+    {
+      "elapsed_seconds": 111.947,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 5,
+      "total_requests": 287052,
+      "bytes_sent": 166682820293
+    },
+    {
+      "elapsed_seconds": 112.956,
+      "rss_kb": 2424,
+      "fd_count": 14,
+      "active_connections": 6,
+      "total_requests": 289889,
+      "bytes_sent": 168352644384
+    },
+    {
+      "elapsed_seconds": 113.964,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 292657,
+      "bytes_sent": 169952203080
+    },
+    {
+      "elapsed_seconds": 114.97,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 295471,
+      "bytes_sent": 171505466908
+    },
+    {
+      "elapsed_seconds": 115.976,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 5,
+      "total_requests": 298333,
+      "bytes_sent": 173187401573
+    },
+    {
+      "elapsed_seconds": 116.985,
+      "rss_kb": 2424,
+      "fd_count": 16,
+      "active_connections": 10,
+      "total_requests": 301259,
+      "bytes_sent": 174825609304
+    },
+    {
+      "elapsed_seconds": 117.996,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 9,
+      "total_requests": 304008,
+      "bytes_sent": 176400279894
+    },
+    {
+      "elapsed_seconds": 119.001,
+      "rss_kb": 2424,
+      "fd_count": 17,
+      "active_connections": 8,
+      "total_requests": 306882,
+      "bytes_sent": 177989834215
+    },
+    {
+      "elapsed_seconds": 120.004,
+      "rss_kb": 2424,
+      "fd_count": 15,
+      "active_connections": 7,
+      "total_requests": 309608,
+      "bytes_sent": 179528442922
+    }
+  ],
+  "rss_kb_min": 2424,
+  "rss_kb_max": 2424,
+  "fd_min": 10,
+  "fd_max": 23,
+  "shutdown_seconds": 5.79,
+  "exit_code": 0,
+  "server_log": "FileHub listening on port 36875, root /tmp/filehub-stability-if52jrx7\n"
+}

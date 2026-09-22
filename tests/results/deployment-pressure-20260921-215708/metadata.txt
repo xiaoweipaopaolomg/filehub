@@ -1,0 +1,12 @@
+url=http://127.0.0.1:8080
+target_path=/info.html
+duration_seconds=15
+connections=10,50,100,200
+threads_max=4
+wrk=/home/wang/miniconda3/envs/filehub-test/bin/wrk
+service=filehub.service
+pid_before=423704
+restarts_before=0
+rss_kb_before=2476
+fd_before=9
+expected_sha256=6c76ddb60e15546180b8238210ef086b7073a270c5d55d43d3cc19a391818e98

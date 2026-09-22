@@ -1,0 +1,47 @@
+{
+  "host": "wang",
+  "kernel": "5.15.0-190-generic",
+  "cpu_count": 12,
+  "binary": "/home/wang/weijd/project/conduit-main/filehub",
+  "wrk": "/home/wang/miniconda3/envs/filehub-test/bin/wrk",
+  "duration_seconds": 5,
+  "rounds": 3,
+  "threads": "1 for c=1, otherwise 2",
+  "random_seed": 2026,
+  "file_sizes": {
+    "tiny": 64,
+    "small": 4096,
+    "medium": 65536,
+    "large": 1048576,
+    "xlarge": 8388608
+  },
+  "http_timings": {
+    "status": {
+      "headers_ms_median": 0.254,
+      "total_ms_median": 0.293
+    },
+    "tiny": {
+      "headers_ms_median": 0.329,
+      "total_ms_median": 0.358
+    },
+    "small": {
+      "headers_ms_median": 0.288,
+      "total_ms_median": 0.325
+    },
+    "medium": {
+      "headers_ms_median": 0.329,
+      "total_ms_median": 0.377
+    },
+    "large": {
+      "headers_ms_median": 0.348,
+      "total_ms_median": 0.696
+    },
+    "xlarge": {
+      "headers_ms_median": 0.402,
+      "total_ms_median": 4.415
+    }
+  },
+  "fd_before": 10,
+  "fd_after": 9,
+  "rss_kb_after": 3288
+}

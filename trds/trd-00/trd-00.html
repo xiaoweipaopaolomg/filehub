@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-00: TCP Echo — Conduit Foundation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #000; background: #fff; max-width: 800px; margin: 0 auto; padding: 40px 30px; }
+  h1 { font-size: 20pt; margin-bottom: 6px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+  .subtitle { font-size: 10pt; margin-bottom: 30px; font-style: italic; color: #000; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 4px; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 6px; }
+  p { margin-bottom: 10px; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+  pre { border: 2px solid #000; padding: 12px 14px; margin: 12px 0; font-family: 'Courier New', monospace; font-size: 9.5pt; line-height: 1.5; background: #fff; color: #000; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9.5pt; color: #000; }
+  ul, ol { margin: 8px 0 10px 24px; }
+  li { margin-bottom: 4px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #000; padding: 6px 10px; text-align: left; font-size: 10pt; }
+  th { font-weight: bold; background: #fff; }
+  .hint-ref { border: 1px solid #000; padding: 4px 10px; margin: 8px 0; font-size: 9.5pt; font-style: italic; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; font-weight: bold; }
+  hr { border: none; border-top: 1px solid #000; margin: 24px 0; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<h1>TRD-00: TCP Echo</h1>
+<div class="subtitle">Conduit Foundation — Conduit HTTP Server Project</div>
+
+<h2>Milestone Summary</h2>
+
+<p><strong>Objective:</strong> Build a single-threaded TCP server in C that listens on a configurable port, accepts one connection at a time, reads an incoming HTTP request (without parsing it), and responds with a hardcoded HTTP/1.1 200 OK response containing a plain text body. Then closes the connection and loops to accept the next one.</p>
+
+<p><strong>What this is NOT:</strong> This is not an HTTP server yet. There is no request parsing, no routing, no file I/O, no concurrency. This is a raw TCP accept loop that happens to speak enough HTTP to be testable with <code>curl</code>.</p>
+
+<p><strong>Why this matters:</strong> Every line of Conduit's future architecture — epoll, thread pool, request parsing — sits on top of this socket foundation. If the <code>bind</code>/<code>listen</code>/<code>accept</code>/<code>read</code>/<code>write</code>/<code>close</code> cycle has bugs, leaks FDs, or mishandles errors, debugging ghosts will persist for weeks in later milestones. Get this bulletproof now.</p>
+
+<hr>
+
+<h2>Technical Requirements</h2>
+
+<h3>R1: Socket Initialization</h3>
+<ul>
+  <li>Create a TCP socket using <code>socket(AF_INET, SOCK_STREAM, 0)</code>.</li>
+  <li>Set <code>SO_REUSEADDR</code> via <code>setsockopt</code> so the server can restart without <code>TIME_WAIT</code> blocking the port.</li>
+  <li>Bind to <code>INADDR_ANY</code> on a port specified as a command-line argument (<code>./conduit &lt;port&gt;</code>).</li>
+  <li>If no port argument is provided, print a usage message to <code>stderr</code> and exit with code <code>1</code>.</li>
+  <li>If <code>socket()</code>, <code>setsockopt()</code>, <code>bind()</code>, or <code>listen()</code> fails, print a descriptive error to <code>stderr</code> (use <code>perror()</code> or equivalent) and exit with a non-zero code.</li>
+</ul>
+<div class="hint-ref">Stuck? See Hints document — <strong>H1</strong> (socket setup) and <strong>H2</strong> (SO_REUSEADDR).</div>
+
+<h3>R2: Listen and Accept Loop</h3>
+<ul>
+  <li>Call <code>listen()</code> with a backlog of at least 128.</li>
+  <li>Enter a loop that calls <code>accept()</code> to get a connected client file descriptor.</li>
+  <li>If <code>accept()</code> fails, log the error to <code>stderr</code> and <code>continue</code> (do NOT crash the server on a failed accept).</li>
+</ul>
+<div class="hint-ref">Stuck? See Hints document — <strong>H3</strong> (the accept loop structure).</div>
+
+<h3>R3: Request Reading</h3>
+<ul>
+  <li>Read from the client socket using <code>read()</code> or <code>recv()</code> into a stack-allocated buffer of at least 4096 bytes.</li>
+  <li>Multi-read assembly, partial reads, and chunked encoding do NOT need handling at this stage. A single <code>read()</code> call is sufficient.</li>
+  <li>If <code>read()</code> returns <code>0</code> (client closed connection) or <code>-1</code> (error), close the client FD and continue the accept loop.</li>
+</ul>
+<div class="hint-ref">Stuck? See Hints document — <strong>H4</strong> (read behavior and edge cases).</div>
+
+<h3>R4: Hardcoded HTTP Response</h3>
+<p>Regardless of what was read, respond with exactly this:</p>
+<pre>HTTP/1.1 200 OK\r\n
+Content-Type: text/plain\r\n
+Content-Length: [body length in bytes]\r\n
+Connection: close\r\n
+\r\n
+Conduit is alive — TRD00</pre>
+<ul>
+  <li>The <code>Content-Length</code> MUST match the actual body length <strong>in bytes, not characters.</strong> The em dash (<code>—</code>) is a multi-byte UTF-8 character. Count bytes, not glyphs. Use <code>echo -n "your string" | wc -c</code> to verify.</li>
+  <li>Use <code>write()</code> or <code>send()</code> to transmit the full response.</li>
+  <li>After sending the response, close the client file descriptor with <code>close()</code>.</li>
+</ul>
+<div class="hint-ref">Stuck? See Hints document — <strong>H5</strong> (building the response string) and <strong>H6</strong> (byte counting).</div>
+
+<h3>R5: Clean Shutdown</h3>
+<ul>
+  <li>Graceful <code>SIGINT</code>/<code>SIGTERM</code> handling is NOT required at this milestone. <code>Ctrl+C</code> to kill is acceptable.</li>
+  <li>The listening socket must not leak FDs in the normal accept loop path.</li>
+</ul>
+
+<h3>R6: Compilation</h3>
+<p>The project MUST compile with:</p>
+<pre>gcc -Wall -Wextra -Werror -std=c11 -o conduit conduit.c</pre>
+<p>Zero warnings. <code>-Werror</code> means every warning is a build failure. Non-negotiable for every TRD going forward.</p>
+<div class="hint-ref">Stuck? See Hints document — <strong>H7</strong> (common warnings and how to fix them).</div>
+
+<h3>R7: No External Dependencies</h3>
+<p>Only POSIX headers and the C standard library. No third-party libraries.</p>
+
+<hr>
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th>#</th><th>Test</th><th>Pass Condition</th></tr>
+  <tr><td>1</td><td><strong>Compiles cleanly</strong></td><td><code>gcc -Wall -Wextra -Werror -std=c11</code> exits 0</td></tr>
+  <tr><td>2</td><td><strong>Usage message</strong></td><td>Running <code>./conduit</code> (no args) prints to stderr and exits non-zero</td></tr>
+  <tr><td>3</td><td><strong>Starts and listens</strong></td><td>Server starts on a given port; a test client can connect via TCP</td></tr>
+  <tr><td>4</td><td><strong>Returns HTTP 200</strong></td><td><code>curl</code> receives a <code>200</code> status code</td></tr>
+  <tr><td>5</td><td><strong>Correct Content-Type</strong></td><td>Response includes <code>Content-Type: text/plain</code></td></tr>
+  <tr><td>6</td><td><strong>Correct Content-Length</strong></td><td><code>Content-Length</code> value matches actual body byte count</td></tr>
+  <tr><td>7</td><td><strong>Connection: close</strong></td><td><code>Connection: close</code> header present</td></tr>
+  <tr><td>8</td><td><strong>Correct body</strong></td><td>Body is exactly <code>Conduit is alive — TRD00</code></td></tr>
+  <tr><td>9</td><td><strong>Sequential requests</strong></td><td>5 sequential <code>curl</code> requests all succeed with 200</td></tr>
+  <tr><td>10</td><td><strong>No FD leak (basic)</strong></td><td>After 20 sequential requests, server still accepts connections</td></tr>
+  <tr><td>11</td><td><strong>Bad client resilience</strong></td><td>A client that connects then immediately disconnects doesn't crash the server</td></tr>
+</table>
+
+<hr>
+
+<h2>Concepts to Understand After Completion</h2>
+
+<p>Before moving to TRD-01, the following should be explainable without looking anything up:</p>
+
+<ol>
+  <li>What does <code>socket(AF_INET, SOCK_STREAM, 0)</code> actually return, and what does the kernel do when it's called?</li>
+  <li>Why is <code>SO_REUSEADDR</code> needed, and what happens without it when restarting the server quickly?</li>
+  <li>What is the <code>listen()</code> backlog, and what happens when it fills up?</li>
+  <li>What's the difference between the listening FD and the client FD returned by <code>accept()</code>?</li>
+  <li>Why does <code>Content-Length</code> matter, and what breaks if it's wrong?</li>
+  <li>What does <code>Connection: close</code> tell the client?</li>
+  <li>What happens if <code>close()</code> is never called on the client FD in the loop?</li>
+</ol>
+
+<div class="callout">If any of these can't be answered confidently, TRD-00 isn't done regardless of whether the tests pass.</div>
+
+<hr>
+
+<h2>What Comes Next (TRD-01 Preview)</h2>
+
+<p>TRD-01 adds HTTP request line parsing — extracting the method, path, and version from <code>GET /path HTTP/1.1</code>. Conduit will start making routing decisions and returning 404s. None of that exists until TRD-00 is green across all 11 tests.</p>
+
+</body>
+</html>

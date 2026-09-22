@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-03: HTTP Response Engine</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-03: HTTP Response Engine</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-01, TRD-02 &nbsp;|&nbsp; Difficulty: Medium &nbsp;|&nbsp; Estimated: 3–5 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Extract all response construction into a reusable <code>http_response_t</code> API. Every HTTP response — success or error — must flow through a single serialization codepath. Refactor all existing TRD-01/02 response logic to use the engine.</p>
+
+
+<h2>Technical Requirements</h2>
+
+<h3>R1 — Response Struct</h3>
+<p>Define <code>http_response_t</code> containing: status code (int), reason phrase (string), headers (key-value array with count), body pointer, body length, and an ownership flag or strategy for the body buffer.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Population API</h3>
+<p>Implement at minimum:</p>
+<ul>
+  <li><code>response_set_status(resp, code, reason)</code> — sets status code and reason phrase</li>
+  <li><code>response_add_header(resp, key, value)</code> — appends a header to the headers array</li>
+  <li><code>response_set_body(resp, data, length)</code> — attaches a body with its byte length</li>
+</ul>
+<p><code>Content-Length</code> must be set automatically from the body length when a body is present. Do not require the caller to add it manually.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R3 — Serialization and Send</h3>
+<p>Implement <code>response_send(fd, resp)</code>. It serializes the struct to HTTP wire format (status line → headers → <code>\r\n</code> → body) and writes to the socket fd. Returns 0 on success, -1 on write failure.</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R4 — Memory Cleanup</h3>
+<p>Implement <code>response_cleanup(resp)</code> or equivalent. Frees any dynamically allocated body buffer according to the ownership strategy. Must be safe to call on responses with static string bodies (string literals must not be freed).</p>
+<span class="hint-ref">Stuck? → Hints H4</span>
+
+<h3>R5 — Refactor All Response Paths</h3>
+<p>Remove all existing ad-hoc <code>snprintf()</code> response construction from TRD-01/02 code. Every response (200, 400, 403, 404, 405) must use the response engine. Add 500 Internal Server Error for unexpected failures (e.g., <code>read()</code> error mid-file, <code>malloc</code> failure).</p>
+
+<h3>R6 — Error Response Bodies</h3>
+<p>All error responses (400, 403, 404, 405, 500) must include a short plain-text body describing the error (e.g., "Not Found", "Method Not Allowed"). The body must not be empty.</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with strict flags</td><td>T1</td></tr>
+  <tr><td>2</td><td><code>GET /</code> → 200 with correct file body (regression)</td><td>T2</td></tr>
+  <tr><td>3</td><td>MIME types still correct (regression)</td><td>T3</td></tr>
+  <tr><td>4</td><td>404, 405, 400, 403 still returned correctly (regression)</td><td>T4–T7</td></tr>
+  <tr><td>5</td><td>All responses have valid <code>HTTP/1.1 NNN Reason</code> status line</td><td>T8–T10</td></tr>
+  <tr><td>6</td><td>All error responses include <code>Content-Type</code> and <code>Content-Length</code></td><td>T11</td></tr>
+  <tr><td>7</td><td>Error response bodies are non-empty</td><td>T12</td></tr>
+  <tr><td>8</td><td>Error <code>Content-Length</code> matches actual error body size</td><td>T13</td></tr>
+  <tr><td>9</td><td>Permission-denied file → 403</td><td>T14</td></tr>
+  <tr><td>10</td><td>Mixed sequential requests (200, 404, 405, 200) all handled</td><td>T15</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>What happens if <code>response_cleanup()</code> calls <code>free()</code> on a string literal? How does the ownership flag prevent this?</li>
+  <li>Why should <code>Content-Length</code> be set automatically inside the engine rather than by the caller?</li>
+  <li>If <code>write()</code> returns fewer bytes than the full response, what happened? (Think about what TRD-04 will need to handle.)</li>
+  <li>When would the server legitimately return 500 instead of 400 or 404?</li>
+</ol>
+
+
+<h2>Preview: TRD-04</h2>
+<p>The server currently handles one connection at a time — blocking on <code>read()</code> and <code>write()</code>. TRD-04 replaces this with a non-blocking epoll event loop where the response engine's output gets buffered per-connection and flushed incrementally as the socket becomes writable. The response struct and serialization from TRD-03 become the foundation that epoll writes from.</p>
+
+
+<div class="footer">
+  Conduit TRD-03 &nbsp;|&nbsp; HTTP Response Engine &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

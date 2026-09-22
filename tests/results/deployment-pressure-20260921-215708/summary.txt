@@ -1,0 +1,4 @@
+restarts_after=0
+rss_kb_after=3996
+fd_after=9
+result=PASS

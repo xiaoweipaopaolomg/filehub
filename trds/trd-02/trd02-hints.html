@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-02 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-02 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push &nbsp;|&nbsp; 15+ minutes before escalating</div>
+</div>
+
+
+<h2>H1 — Path Resolution (R1)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>You need to join two strings: the document root and the request path. Think about what character separates them. What if the docroot ends with <code>/</code> and the request path starts with <code>/</code>? What if neither has one?</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+  <p>Use <code>snprintf()</code> to build the combined path. If the request path is <code>/</code>, append <code>index.html</code> instead:</p>
+<pre>char filepath[2048];
+if (strcmp(req.path, "/") == 0) {
+    snprintf(filepath, sizeof(filepath), "%s/index.html", docroot);
+} else {
+    snprintf(filepath, sizeof(filepath), "%s%s", docroot, req.path);
+}</pre>
+  <p>The request path from TRD-01 already starts with <code>/</code>, so <code>docroot + path</code> naturally forms a valid path like <code>/srv/www/style.css</code>.</p>
+</div>
+
+
+<h2>H2 — Directory Traversal Prevention (R2)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Two steps: resolve the real path, then check it starts where it should. <code>realpath()</code> turns any path into its absolute canonical form. After resolving, a simple <code>strncmp()</code> against the docroot tells you if the file is inside the allowed directory.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>char resolved[PATH_MAX];
+char resolved_root[PATH_MAX];
+
+/* Resolve both the file path and the docroot */
+if (realpath(filepath, resolved) == NULL) {
+    /* File doesn't exist → 404 */
+    return send_error(client_fd, 404);
+}
+realpath(docroot, resolved_root);
+
+/* Prefix check */
+if (strncmp(resolved, resolved_root, strlen(resolved_root)) != 0) {
+    /* Path escaped docroot → 403 */
+    return send_error(client_fd, 403);
+}</pre>
+  <p>Resolve the docroot too — don't compare a resolved path against a potentially relative docroot string. Both must be canonical.</p>
+</div>
+
+
+<h2>H3 — File Reading (R3)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Open the file, ask the OS how big it is, allocate a buffer that size, read into it. Don't forget: <code>read()</code> can return fewer bytes than you asked for, even on regular files. Loop until you've read <code>st_size</code> bytes or hit an error.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>int fd = open(resolved, O_RDONLY);
+if (fd == -1) {
+    /* errno == ENOENT → 404, else → 500 */
+}
+
+struct stat sb;
+fstat(fd, &amp;sb);
+
+char *body = malloc(sb.st_size);
+int total = 0;
+while (total &lt; sb.st_size) {
+    int n = read(fd, body + total, sb.st_size - total);
+    if (n &lt;= 0) break;
+    total += n;
+}
+close(fd);
+
+/* Use sb.st_size for Content-Length */
+/* Free body after sending the response */</pre>
+</div>
+
+
+<h2>H4 — MIME Type Mapping (R4)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Find the last dot in the filename. Compare the extension string against known types. <code>strrchr()</code> finds the last occurrence of a character in a string — use it to find the dot.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>const char *get_mime_type(const char *path) {
+    const char *ext = strrchr(path, '.');
+    if (!ext) return "application/octet-stream";
+    if (strcmp(ext, ".html") == 0) return "text/html";
+    if (strcmp(ext, ".css") == 0)  return "text/css";
+    if (strcmp(ext, ".js") == 0)   return "application/javascript";
+    if (strcmp(ext, ".txt") == 0)  return "text/plain";
+    if (strcmp(ext, ".jpg") == 0)  return "image/jpeg";
+    if (strcmp(ext, ".png") == 0)  return "image/png";
+    return "application/octet-stream";
+}</pre>
+  <p>This is simple and correct. A hash map would be faster but is unnecessary for 6 entries.</p>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-02 Hints &nbsp;|&nbsp; Static File Serving &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

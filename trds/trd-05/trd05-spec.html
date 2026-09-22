@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-05: Thread Pool</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-05: Thread Pool</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-04 &nbsp;|&nbsp; Difficulty: Hard &nbsp;|&nbsp; Estimated: 5–8 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Move request processing off the event loop into a fixed-size pool of worker threads using a mutex/condvar-protected task queue. The event loop enqueues; workers dequeue, process, and respond.</p>
+
+
+<h2>Technical Requirements</h2>
+
+<h3>R1 — Thread Pool API</h3>
+<p>Implement three functions:</p>
+<ul>
+  <li><code>threadpool_init(int num_threads)</code> — allocates pool, initializes mutex/condvar, spawns N worker threads</li>
+  <li><code>threadpool_enqueue(pool, task)</code> — adds a task to the queue, signals one waiting worker</li>
+  <li><code>threadpool_destroy(pool)</code> — sets shutdown flag, broadcasts condvar, joins all threads, frees resources</li>
+</ul>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Task Queue</h3>
+<p>Implement a linked list (or ring buffer) protected by the pool's mutex. Each node holds a <code>connection_t *</code>. Enqueue appends to the tail; dequeue removes from the head.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R3 — Worker Thread Function</h3>
+<p>Each worker runs a loop: lock mutex → wait on condvar (with <code>while</code> loop checking queue empty + shutdown flag) → dequeue task → unlock → process request → send response → close connection. Workers exit when shutdown is set and the queue is empty.</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R4 — Event Loop Integration</h3>
+<p>When the event loop detects a complete request (TRD-04's <code>\r\n\r\n</code> detection), instead of processing inline, call <code>threadpool_enqueue()</code> with the connection. Remove the connection's fd from epoll before enqueuing — the worker now owns it.</p>
+
+<h3>R5 — Worker Response Delivery</h3>
+<p>Workers call the request parser, file serving logic, and response engine from TRD-01–03. The worker writes the response directly to the connection's fd, then closes the fd and frees the <code>connection_t</code>.</p>
+
+<h3>R6 — Graceful Shutdown</h3>
+<p>On <code>SIGTERM</code>/<code>SIGINT</code>: stop accepting new connections, call <code>threadpool_destroy()</code> (which drains the queue and joins all workers), close the listen socket, exit cleanly with code 0.</p>
+<span class="hint-ref">Stuck? → Hints H4</span>
+
+<h3>R7 — Compilation</h3>
+<p>Link with <code>-lpthread</code> (or use <code>-pthread</code> flag). The test suite will compile with this flag.</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with strict flags + <code>-pthread</code></td><td>T1</td></tr>
+  <tr><td>2</td><td>Basic request/response still works</td><td>T2, T3</td></tr>
+  <tr><td>3</td><td>10 concurrent connections all return 200</td><td>T4</td></tr>
+  <tr><td>4</td><td>50 concurrent connections (exceeding thread count)</td><td>T5</td></tr>
+  <tr><td>5</td><td>Concurrent large file requests</td><td>T6</td></tr>
+  <tr><td>6</td><td>Mixed status codes under concurrency</td><td>T7</td></tr>
+  <tr><td>7</td><td><code>SIGTERM</code> → clean exit (code 0)</td><td>T8</td></tr>
+  <tr><td>8</td><td>100 rapid sequential requests</td><td>T9</td></tr>
+  <tr><td>9</td><td>No fd leaks under sustained load</td><td>T10</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>Why must <code>pthread_cond_wait()</code> be inside a <code>while</code> loop, not an <code>if</code>?</li>
+  <li>What happens if <code>threadpool_destroy()</code> calls <code>pthread_cond_signal()</code> instead of <code>pthread_cond_broadcast()</code>?</li>
+  <li>Why remove the connection's fd from epoll before handing it to a worker thread?</li>
+  <li>If two workers dequeue simultaneously, what prevents them from getting the same task?</li>
+</ol>
+
+
+<h2>Preview: TRD-06</h2>
+<p>The server is now functional and concurrent but fragile. A malicious client can send a 1 GB request line, exhaust fds by opening connections without closing them, or crash the server by closing a connection mid-write. TRD-06 hardens against all of these: request size limits, connection caps, idle timeouts, SIGPIPE suppression, and disciplined error handling on every syscall.</p>
+
+
+<div class="footer">
+  Conduit TRD-05 &nbsp;|&nbsp; Thread Pool &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-02 Prior Knowledge: Static File Serving</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 28px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .diagram { border: 1.5px solid #000; padding: 14px; margin: 14px 0; text-align: center; page-break-inside: avoid; }
+  .diagram-caption { font-size: 8.5pt; font-style: italic; text-align: center; margin-top: 6px; }
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-02 Prior Knowledge</h1>
+  <div class="subtitle">Static File Serving — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-01 complete (request parsing, method/path routing, status codes)</div>
+</div>
+
+
+<h2>1 &nbsp; POSIX File I/O</h2>
+
+<p>Serving a file means: open it, figure out how big it is, read its contents into a buffer, and write that buffer as the HTTP response body. Four syscalls handle this.</p>
+
+<table>
+  <tr>
+    <th style="width:120px;">Syscall</th>
+    <th>Purpose</th>
+    <th style="width:180px;">Key detail</th>
+  </tr>
+  <tr>
+    <td><code>open(path, O_RDONLY)</code></td>
+    <td>Opens the file, returns a file descriptor</td>
+    <td>Returns -1 on failure (file not found, permissions). Check <code>errno</code>.</td>
+  </tr>
+  <tr>
+    <td><code>fstat(fd, &amp;sb)</code></td>
+    <td>Gets file metadata into a <code>struct stat</code></td>
+    <td><code>sb.st_size</code> gives the file size in bytes — use this for <code>Content-Length</code>.</td>
+  </tr>
+  <tr>
+    <td><code>read(fd, buf, count)</code></td>
+    <td>Reads bytes from the file into a buffer</td>
+    <td>May return fewer bytes than requested. Loop until all <code>st_size</code> bytes are read or EOF.</td>
+  </tr>
+  <tr>
+    <td><code>close(fd)</code></td>
+    <td>Releases the file descriptor</td>
+    <td>Always close — even on error paths. Leaked file descriptors exhaust the OS limit.</td>
+  </tr>
+</table>
+
+<p>The pattern is always: <code>open</code> → <code>fstat</code> → allocate buffer → <code>read</code> → use data → <code>close</code>. If <code>open()</code> fails with <code>ENOENT</code>, the file doesn't exist — return 404. If it fails with <code>EACCES</code>, return 403.</p>
+
+
+<h2>2 &nbsp; Path Resolution</h2>
+
+<p>The server receives a URI path like <code>/style.css</code> from the parsed request (TRD-01). This must be mapped to a real filesystem path. The mapping is:</p>
+
+<pre>filesystem_path = docroot + request_path</pre>
+
+<p>Where <code>docroot</code> is a directory specified on the command line. If <code>docroot</code> is <code>/srv/www</code> and the request is <code>GET /style.css</code>, the server opens <code>/srv/www/style.css</code>.</p>
+
+<p>Special case: <code>GET /</code> should serve <code>index.html</code> from the document root. This is a convention, not a spec requirement — but it's universal enough that omitting it would be surprising.</p>
+
+<h3>2.1 &nbsp; Directory Traversal</h3>
+
+<p>This is the security-critical concept in TRD-02.</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 660 155" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, serif" font-size="10">
+    <!-- Docroot box -->
+    <rect x="30" y="10" width="280" height="60" fill="none" stroke="#000" stroke-width="2"/>
+    <text x="170" y="32" text-anchor="middle" font-weight="bold" font-size="11">Document Root</text>
+    <text x="170" y="50" text-anchor="middle" font-family="'Courier New', monospace" font-size="9">/srv/www/</text>
+    <text x="170" y="63" text-anchor="middle" font-size="8">index.html, style.css, ...</text>
+
+    <!-- Filesystem outside -->
+    <rect x="370" y="10" width="260" height="60" fill="none" stroke="#000" stroke-width="2" stroke-dasharray="5,3"/>
+    <text x="500" y="32" text-anchor="middle" font-weight="bold" font-size="11">Outside Docroot</text>
+    <text x="500" y="50" text-anchor="middle" font-family="'Courier New', monospace" font-size="9">/etc/passwd, /root/.ssh/</text>
+    <text x="500" y="63" text-anchor="middle" font-size="8">MUST NOT be accessible</text>
+
+    <!-- Attack arrow -->
+    <path d="M 170,75 Q 170,110 350,110 Q 500,110 500,75" fill="none" stroke="#000" stroke-width="1.5" marker-end="url(#arw)"/>
+    <text x="340" y="105" text-anchor="middle" font-size="9" font-weight="bold">GET /../../../etc/passwd</text>
+    <text x="340" y="120" text-anchor="middle" font-size="8" font-style="italic">Naive concatenation: /srv/www/../../../etc/passwd → /etc/passwd</text>
+
+    <!-- Defense -->
+    <rect x="130" y="132" width="400" height="22" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="330" y="148" text-anchor="middle" font-size="9" font-weight="bold">Defense: realpath() + prefix check → 403 Forbidden</text>
+
+    <defs><marker id="arw" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#000"/></marker></defs>
+  </svg>
+  <div class="diagram-caption">Figure 1 — Directory traversal attack and defense</div>
+</div>
+
+<p>If the server naively concatenates <code>docroot + path</code>, an attacker can use <code>..</code> sequences to escape the document root and read any file on the system. This is a real CVE-class vulnerability — it appears regularly in web server security advisories.</p>
+
+<p>The defense has two steps:</p>
+<ol>
+  <li><strong>Resolve the full path</strong> using <code>realpath()</code>, which resolves all <code>..</code>, symlinks, and relative components into an absolute canonical path.</li>
+  <li><strong>Verify the resolved path starts with the document root.</strong> If <code>realpath()</code> returns <code>/etc/passwd</code> and the docroot is <code>/srv/www</code>, the prefix check fails → return 403.</li>
+</ol>
+
+<div class="callout">
+  <strong>Why not just check for ".." in the raw URI?</strong> Because attackers can encode it: <code>%2e%2e</code>, double-encoding, Unicode tricks, and symlinks all bypass string-level checks. <code>realpath()</code> resolves the actual filesystem path at the OS level — it handles all of these cases. Always resolve first, then check the prefix.
+</div>
+
+
+<h2>3 &nbsp; MIME Types</h2>
+
+<p>The <code>Content-Type</code> header tells the client how to interpret the response body. It's determined by the file extension.</p>
+
+<table>
+  <tr><th style="width:100px;">Extension</th><th style="width:220px;">Content-Type</th><th>Notes</th></tr>
+  <tr><td><code>.html</code></td><td><code>text/html</code></td><td>Browsers render this as a web page</td></tr>
+  <tr><td><code>.css</code></td><td><code>text/css</code></td><td>Browsers reject CSS served with wrong type</td></tr>
+  <tr><td><code>.js</code></td><td><code>application/javascript</code></td><td><code>text/javascript</code> also accepted</td></tr>
+  <tr><td><code>.txt</code></td><td><code>text/plain</code></td><td>Displayed as raw text</td></tr>
+  <tr><td><code>.jpg</code></td><td><code>image/jpeg</code></td><td>Note: extension is .jpg but type is jpeg</td></tr>
+  <tr><td><code>.png</code></td><td><code>image/png</code></td><td></td></tr>
+  <tr><td>(unknown)</td><td><code>application/octet-stream</code></td><td>Safe fallback — browser will offer download</td></tr>
+</table>
+
+<p>Implementation: find the last <code>.</code> in the filename with <code>strrchr(path, '.')</code>, then compare the extension against a lookup table. If no dot or no match, use the octet-stream fallback.</p>
+
+
+<h2>4 &nbsp; The New CLI Interface</h2>
+
+<p>TRD-01's server took one argument: <code>./conduit &lt;port&gt;</code>. TRD-02 adds a second: <code>./conduit &lt;port&gt; &lt;docroot&gt;</code>. If either argument is missing, print a usage message to stderr and exit with code 1. Validate that the docroot directory exists (<code>opendir()</code> or <code>stat()</code>) before entering the accept loop.</p>
+
+
+<h2>5 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Primary</div>
+  <ul>
+    <li><code>man 2 open</code>, <code>man 2 fstat</code>, <code>man 2 read</code>, <code>man 2 close</code> — the file I/O syscalls</li>
+    <li><code>man 3 realpath</code> — canonical path resolution</li>
+    <li><code>man 3 strrchr</code> — finding the last occurrence of a character</li>
+    <li><strong>OWASP Path Traversal</strong> — <a href="https://owasp.org/www-community/attacks/Path_Traversal">owasp.org/www-community/attacks/Path_Traversal</a></li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Supplementary</div>
+  <ul>
+    <li><strong>Mozilla MDN — Common MIME types</strong> — <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/MIME_types/Common_types">developer.mozilla.org</a></li>
+    <li><code>man 2 stat</code> — alternative to <code>fstat</code> when you have a path instead of an fd</li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-02 Prior Knowledge &nbsp;|&nbsp; Static File Serving &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

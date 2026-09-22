@@ -1,0 +1,15 @@
+Command: /home/wang/miniconda3/envs/filehub-test/bin/wrk -t2 -c50 -d5s --latency http://127.0.0.1:60731/large.bin
+
+Running 5s test @ http://127.0.0.1:60731/large.bin
+  2 threads and 50 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    20.39ms   18.07ms  59.72ms   54.98%
+    Req/Sec     1.32k   420.50     2.95k    85.00%
+  Latency Distribution
+     50%   23.39ms
+     75%   41.81ms
+     90%   46.16ms
+     99%   51.23ms
+  13160 requests in 5.02s, 12.89GB read
+Requests/sec:   2621.62
+Transfer/sec:      2.57GB

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-04 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-04 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push &nbsp;|&nbsp; 15+ minutes before escalating</div>
+</div>
+
+
+<h2>H1 — Epoll Setup and Non-Blocking Sockets (R1, R2)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Three setup steps before the event loop: (1) create the epoll instance, (2) set the listen socket to non-blocking, (3) register the listen socket with epoll for <code>EPOLLIN | EPOLLET</code>. The <code>epoll_event.data.fd</code> should be set to the listen fd so you can identify it in the event loop.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+int epfd = epoll_create1(0);
+if (epfd == -1) { perror("epoll_create1"); exit(1); }
+
+set_nonblocking(listen_fd);
+
+struct epoll_event ev;
+ev.events = EPOLLIN | EPOLLET;
+ev.data.fd = listen_fd;
+epoll_ctl(epfd, EPOLL_CTL_ADD, listen_fd, &amp;ev);</pre>
+  <p>Note: for the listen socket, <code>data.fd</code> is fine. For client sockets, you'll switch to <code>data.ptr</code> (see H3).</p>
+</div>
+
+
+<h2>H2 — Edge-Triggered Accept Loop (R4)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>In edge-triggered mode, one <code>EPOLLIN</code> on the listen socket may signal multiple pending connections. Call <code>accept()</code> in a <code>while(1)</code> loop. When it returns <code>-1</code> and errno is <code>EAGAIN</code>, all pending connections have been accepted — break out.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void handle_accept(int epfd, int listen_fd) {
+    while (1) {
+        int client_fd = accept(listen_fd, NULL, NULL);
+        if (client_fd == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+            perror("accept");
+            return;
+        }
+        set_nonblocking(client_fd);
+
+        connection_t *conn = calloc(1, sizeof(connection_t));
+        conn-&gt;fd = client_fd;
+        conn-&gt;state = CONN_READING;
+
+        struct epoll_event ev;
+        ev.events = EPOLLIN | EPOLLET;
+        ev.data.ptr = conn;
+        epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &amp;ev);
+    }
+}</pre>
+  <p><code>calloc</code> zeroes the struct, so <code>read_len</code>, <code>write_offset</code>, etc. start at 0.</p>
+</div>
+
+
+<h2>H3 — Per-Connection State Struct (R5)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Each connection needs its own buffers and state because the event loop handles many connections interleaved. You can't use a single global buffer. Store a pointer to the <code>connection_t</code> in <code>epoll_event.data.ptr</code> so when epoll fires an event, you can cast <code>events[i].data.ptr</code> back to <code>connection_t *</code> to access that connection's state.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>typedef enum { CONN_READING, CONN_WRITING, CONN_DONE } conn_state_t;
+
+typedef struct {
+    int fd;
+    conn_state_t state;
+    char read_buf[8192];
+    int read_len;
+    char *write_buf;       /* malloc'd serialized response */
+    int write_len;
+    int write_offset;
+} connection_t;</pre>
+  <p>In the event loop, recover the connection:</p>
+<pre>connection_t *conn = (connection_t *)events[i].data.ptr;</pre>
+  <p>But first check if the event is for the listen socket. A simple way: compare <code>events[i].data.fd</code> to <code>listen_fd</code> — but you set <code>data.ptr</code> for clients, not <code>data.fd</code>. One pattern: check if the event's fd matches the listen fd by keeping <code>data.fd</code> for the listen socket only and <code>data.ptr</code> for clients. Differentiate by checking if <code>events[i].data.fd == listen_fd</code> first (this works because the union's memory overlaps — the fd is the first few bytes of the pointer on most systems). A cleaner pattern: wrap the listen socket in its own <code>connection_t</code> with a special state, or simply store the listen fd in a variable and compare.</p>
+</div>
+
+
+<h2>H4 — Read Handling with Edge-Triggered Drain (R6)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>When <code>EPOLLIN</code> fires on a client fd, read in a loop. Each iteration appends to <code>read_buf + read_len</code>. After each successful read, check for <code>\r\n\r\n</code>. When found, process the request. If <code>read()</code> returns <code>EAGAIN</code>, stop — all currently available data has been consumed. If <code>read()</code> returns 0, the client disconnected — clean up.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void handle_read(int epfd, connection_t *conn) {
+    while (1) {
+        int space = sizeof(conn-&gt;read_buf) - conn-&gt;read_len - 1;
+        if (space &lt;= 0) {
+            /* Buffer full, no \r\n\r\n found → 400 */
+            send_error_and_close(epfd, conn, 400);
+            return;
+        }
+        int n = read(conn-&gt;fd, conn-&gt;read_buf + conn-&gt;read_len, space);
+        if (n == -1) {
+            if (errno == EAGAIN) return;   /* done for now */
+            close_connection(epfd, conn);  /* real error */
+            return;
+        }
+        if (n == 0) {
+            close_connection(epfd, conn);  /* client disconnected */
+            return;
+        }
+        conn-&gt;read_len += n;
+        conn-&gt;read_buf[conn-&gt;read_len] = '\0';
+
+        if (strstr(conn-&gt;read_buf, "\r\n\r\n")) {
+            /* Full headers received → parse, build response */
+            process_request(epfd, conn);
+            return;
+        }
+    }
+}</pre>
+</div>
+
+
+<h2>H5 — Write Handling with Partial Send Tracking (R7)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>The write buffer holds the full serialized response. <code>write_offset</code> starts at 0. Each write attempt starts from <code>write_buf + write_offset</code> with <code>write_len - write_offset</code> bytes remaining. Advance the offset by however many bytes were actually written. When offset equals total length, the response is complete.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void handle_write(int epfd, connection_t *conn) {
+    while (conn-&gt;write_offset &lt; conn-&gt;write_len) {
+        int remaining = conn-&gt;write_len - conn-&gt;write_offset;
+        int n = write(conn-&gt;fd,
+                      conn-&gt;write_buf + conn-&gt;write_offset,
+                      remaining);
+        if (n == -1) {
+            if (errno == EAGAIN) return;   /* buffer full, wait */
+            close_connection(epfd, conn);  /* real error */
+            return;
+        }
+        conn-&gt;write_offset += n;
+    }
+    /* All bytes sent */
+    close_connection(epfd, conn);
+}</pre>
+  <p>When transitioning from READING to WRITING, modify the epoll registration to watch <code>EPOLLOUT | EPOLLET</code> instead of <code>EPOLLIN</code>:</p>
+<pre>struct epoll_event ev;
+ev.events = EPOLLOUT | EPOLLET;
+ev.data.ptr = conn;
+epoll_ctl(epfd, EPOLL_CTL_MOD, conn-&gt;fd, &amp;ev);</pre>
+</div>
+
+
+<div class="callout">
+  <strong>Debugging tip:</strong> If the server works for single requests but hangs under concurrency, the most likely cause is a missing ET drain loop — either in accept, read, or write. Run <code>strace -f -e trace=network ./conduit &lt;port&gt; &lt;docroot&gt;</code> and look for <code>accept</code>/<code>read</code>/<code>write</code> calls that happen only once per event instead of looping to <code>EAGAIN</code>.
+</div>
+
+
+<div class="footer">
+  Conduit TRD-04 Hints &nbsp;|&nbsp; Epoll Event Loop &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

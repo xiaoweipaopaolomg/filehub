@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-06 Prior Knowledge: Hardening</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 28px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-06 Prior Knowledge</h1>
+  <div class="subtitle">Hardening — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-05 complete (thread pool + epoll event loop)</div>
+</div>
+
+<p>The server is functional and concurrent. Now it needs to not die under hostile conditions. Every concept in this document addresses a real class of production server bugs.</p>
+
+
+<h2>1 &nbsp; SIGPIPE</h2>
+
+<p>When the server calls <code>write()</code> on a socket whose remote end has already closed, the kernel delivers <code>SIGPIPE</code>. The default action for <code>SIGPIPE</code> is to <strong>terminate the process</strong>. One disconnected client kills the entire server.</p>
+
+<p>Two suppression methods:</p>
+
+<table>
+  <tr><th style="width:220px;">Method</th><th>How</th></tr>
+  <tr>
+    <td><code>signal(SIGPIPE, SIG_IGN)</code></td>
+    <td>At startup, globally ignore SIGPIPE. <code>write()</code> then returns <code>-1</code> with <code>errno == EPIPE</code> instead of killing the process. Simplest approach.</td>
+  </tr>
+  <tr>
+    <td><code>MSG_NOSIGNAL</code> flag</td>
+    <td>Pass <code>MSG_NOSIGNAL</code> as a flag to <code>send()</code> (not <code>write()</code>). Suppresses SIGPIPE per-call. More granular but requires changing every write to use <code>send()</code>.</td>
+  </tr>
+</table>
+
+<p>For Conduit, <code>signal(SIGPIPE, SIG_IGN)</code> at startup is the right choice — global, one line, impossible to forget.</p>
+
+
+<h2>2 &nbsp; Request Size Limits</h2>
+
+<p>Without a size limit, a malicious client can send a multi-gigabyte request line that exhausts the server's memory. The read buffer in <code>connection_t</code> (from TRD-04) already has a fixed size — if it fills up before <code>\r\n\r\n</code> is found, the request is oversized. Return <strong>400 Bad Request</strong> and close the connection.</p>
+
+<p>8 KB is a common limit for request headers (Apache and nginx both default to this range). This is already implicit in the 8192-byte read buffer from TRD-04 — TRD-06 makes it explicit and ensures the server responds with 400 rather than silently dropping the connection.</p>
+
+
+<h2>3 &nbsp; Connection Limits</h2>
+
+<p>Every open connection consumes a file descriptor. Linux has per-process fd limits (typically 1024 soft, 65536 hard). If the server runs out, <code>accept()</code> fails with <code>EMFILE</code> and new clients are refused with no response at all.</p>
+
+<p>A responsible server tracks open connections and stops accepting when at capacity, optionally returning <strong>503 Service Unavailable</strong>. This is better than silently dropping connections at the kernel level.</p>
+
+
+<h2>4 &nbsp; Idle Connection Timeouts</h2>
+
+<p>A client may connect, send partial headers, and then go silent — intentionally (slowloris attack) or accidentally (network failure). Without timeouts, these connections sit in <code>CONN_READING</code> forever, consuming memory and fds.</p>
+
+<p>Implementation pattern:</p>
+<ol>
+  <li>Store a <code>last_active</code> timestamp (from <code>time()</code> or <code>clock_gettime()</code>) in each <code>connection_t</code></li>
+  <li>Update it on every successful <code>read()</code> or <code>write()</code></li>
+  <li>Pass a timeout to <code>epoll_wait()</code> (e.g., 1000ms) so it returns periodically even with no events</li>
+  <li>On each <code>epoll_wait()</code> return, sweep all connections: if <code>now - last_active &gt; threshold</code>, close the connection</li>
+</ol>
+
+<div class="callout">
+  <strong>Why not <code>sleep()</code> or <code>alarm()</code>?</strong> <code>sleep()</code> blocks the event loop — fatal. <code>alarm()</code> uses signals which are messy with threads. The <code>epoll_wait()</code> timeout is the correct mechanism: it returns periodically without blocking, and the sweep runs in the event loop's normal flow.
+</div>
+
+
+<h2>5 &nbsp; Signal Handling with <code>volatile sig_atomic_t</code></h2>
+
+<p>TRD-05 introduced <code>SIGTERM</code> shutdown. TRD-06 formalizes the signal handler. The handler must only set a flag — no <code>printf()</code>, no <code>malloc()</code>, no mutex operations. Only <strong>async-signal-safe</strong> functions may be called inside a signal handler.</p>
+
+<pre>volatile sig_atomic_t shutdown_flag = 0;
+
+void handle_signal(int sig) {
+    (void)sig;
+    shutdown_flag = 1;
+}</pre>
+
+<p><code>volatile</code> prevents the compiler from optimizing away reads of the flag. <code>sig_atomic_t</code> guarantees atomic reads/writes. The event loop checks <code>shutdown_flag</code> on each iteration.</p>
+
+
+<h2>6 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Primary</div>
+  <ul>
+    <li><code>man 7 signal</code> and <code>man 7 signal-safety</code> — which functions are async-signal-safe</li>
+    <li><code>man 2 epoll_wait</code> — the <code>timeout</code> parameter</li>
+    <li><code>man 2 sigaction</code> — preferred over <code>signal()</code> for portable behavior</li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Supplementary</div>
+  <ul>
+    <li><strong>Slowloris attack</strong> — <a href="https://en.wikipedia.org/wiki/Slowloris_(computer_security)">Wikipedia</a> — the exact attack idle timeouts prevent</li>
+    <li><code>man 3 clock_gettime</code> — monotonic clock for timestamps (immune to wall-clock adjustments)</li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-06 Prior Knowledge &nbsp;|&nbsp; Hardening &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-00 Hints: Progressive Guidance</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #000; background: #fff; max-width: 800px; margin: 0 auto; padding: 40px 30px; }
+  h1 { font-size: 20pt; margin-bottom: 6px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+  .subtitle { font-size: 10pt; margin-bottom: 30px; font-style: italic; color: #000; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 4px; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 6px; }
+  p { margin-bottom: 10px; }
+  strong { font-weight: bold; }
+  em { font-style: italic; }
+  pre { border: 2px solid #000; padding: 12px 14px; margin: 12px 0; font-family: 'Courier New', monospace; font-size: 9.5pt; line-height: 1.5; background: #fff; color: #000; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9.5pt; color: #000; }
+  ul, ol { margin: 8px 0 10px 24px; }
+  li { margin-bottom: 4px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #000; padding: 6px 10px; text-align: left; font-size: 10pt; }
+  th { font-weight: bold; }
+  .level-box { border: 2px solid #000; padding: 12px 16px; margin: 10px 0; }
+  .level-label { font-weight: bold; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; font-weight: bold; }
+  hr { border: none; border-top: 1px solid #000; margin: 24px 0; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>TRD-00 Hints</h1>
+<div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+
+<p>Each hint has two levels. <strong>Level 1</strong> is a nudge — enough to unblock without giving the answer. <strong>Level 2</strong> is more direct. Try Level 1 first. If still stuck after 15+ minutes, move to Level 2.</p>
+
+<p>The goal is learning, not speed. Fighting through confusion builds the mental model. These hints exist to prevent <em>wasted</em> time, not <em>productive</em> struggle.</p>
+
+<hr>
+
+<h2>H1: Socket Setup</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p>The three syscalls needed are <code>socket()</code>, <code>setsockopt()</code>, and <code>bind()</code>, in that order. Each returns <code>-1</code> on failure. The headers needed are <code>&lt;sys/socket.h&gt;</code>, <code>&lt;netinet/in.h&gt;</code>, and <code>&lt;unistd.h&gt;</code>. Start by just calling <code>socket()</code> and printing the returned FD to confirm it works before adding anything else.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+<pre>// This is the correct signature. Fill in the struct setup yourself.
+int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+if (server_fd == -1) {
+    perror("socket");
+    exit(EXIT_FAILURE);
+}</pre>
+  <p><code>AF_INET</code> means IPv4. <code>SOCK_STREAM</code> means TCP (as opposed to <code>SOCK_DGRAM</code> for UDP). The third argument <code>0</code> lets the OS choose the protocol (which is TCP given the other two args). If this call succeeds, a valid file descriptor integer (usually 3 or higher, since 0/1/2 are stdin/stdout/stderr) is returned.</p>
+</div>
+
+<hr>
+
+<h2>H2: SO_REUSEADDR</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p><code>setsockopt</code> takes 5 arguments. The "option value" is a pointer to an <code>int</code> set to <code>1</code>. This call must happen <em>after</em> <code>socket()</code> but <em>before</em> <code>bind()</code>. Check <code>man 2 setsockopt</code> for the signature.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+<pre>int opt = 1;
+if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &amp;opt, sizeof(opt)) == -1) {
+    perror("setsockopt");
+    close(server_fd);
+    exit(EXIT_FAILURE);
+}</pre>
+  <p><code>&amp;opt</code> is a pointer to the integer value <code>1</code>, meaning "enable this option." <code>sizeof(opt)</code> tells the kernel how many bytes that value occupies. Without this, restarting the server within ~60 seconds will fail with <code>EADDRINUSE</code>.</p>
+</div>
+
+<hr>
+
+<h2>H3: The Accept Loop</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p>The structure is a <code>while(1)</code> loop containing <code>accept()</code>. The call blocks — it sits and waits until a client connects. It returns a <em>new</em> file descriptor for the connected client, separate from the listening FD. Think about: what happens if <code>accept()</code> fails? Should the whole server die, or should it skip and try again?</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+<pre>while (1) {
+    client_fd = accept(server_fd, ...);
+    if (client_fd == -1) {
+        perror("accept");
+        continue;   // Don't exit! Just skip this connection.
+    }
+    // ... read, write, close client_fd ...
+}</pre>
+  <p>The second and third arguments to <code>accept()</code> can be <code>NULL</code> and <code>NULL</code> if the client's address information isn't needed (it isn't for TRD-00). Using <code>continue</code> instead of <code>exit</code> on a failed accept is critical — one bad connection attempt shouldn't kill the server. This is what test 11 validates.</p>
+</div>
+
+<hr>
+
+<h2>H4: Read Behavior and Edge Cases</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p><code>read()</code> returns three kinds of values: positive (number of bytes read), zero (client closed connection), and <code>-1</code> (error). The code needs to handle all three. For TRD-00, only the positive case needs to proceed — the other two should close the client FD and <code>continue</code>.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+<pre>char buffer[4096];
+ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+if (bytes_read &lt;= 0) {
+    close(client_fd);
+    continue;
+}</pre>
+  <p><code>sizeof(buffer) - 1</code> leaves room for a null terminator if the buffer contents are ever treated as a string. At TRD-00, the read data isn't actually used — the response is hardcoded — but reading is still necessary because some clients (including <code>curl</code>) won't accept a response until the server has read their request. The <code>ssize_t</code> type (signed size) is important: <code>read()</code> can return <code>-1</code>, so an unsigned type would misinterpret that value.</p>
+</div>
+
+<hr>
+
+<h2>H5: Building the Response String</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p>The entire response — status line, headers, blank line, and body — can be a single string constant. Use <code>\r\n</code> for line endings, not just <code>\n</code>. The blank line between headers and body is <code>\r\n\r\n</code> (the last header's CRLF plus the empty line's CRLF). Think about how to get the whole thing into one <code>write()</code> call.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+  <p>A single <code>const char *response = "HTTP/1.1 200 OK\r\n...";</code> string is the simplest approach. Use <code>strlen()</code> to compute the number of bytes to write. The <code>write()</code> call:</p>
+<pre>write(client_fd, response, strlen(response));</pre>
+  <p>One detail: <code>write()</code> may not write all bytes in a single call (a "short write"). For TRD-00 with a small response, this is extremely unlikely, but awareness matters. Handling short writes properly becomes important in later TRDs.</p>
+</div>
+
+<hr>
+
+<h2>H6: Byte Counting (Content-Length)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p>The body string contains a character that looks like one glyph but is multiple bytes in UTF-8. ASCII characters are 1 byte each. Non-ASCII characters are 2–4 bytes. Don't count characters — count bytes. Use <code>echo -n "your body string" | wc -c</code> to verify. In C, <code>strlen()</code> already counts bytes, not characters.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+  <p>The em dash <code>—</code> (U+2014) is encoded as 3 bytes in UTF-8: <code>0xE2 0x80 0x94</code>. The body <code>Conduit is alive — TRD00</code> is 26 bytes. Verify:</p>
+<pre>echo -n "Conduit is alive — TRD00" | wc -c</pre>
+  <p>If the source file is saved as UTF-8 (which it almost certainly is), then the C string literal will contain the 3-byte encoding, and <code>strlen()</code> will return 26. The <code>Content-Length</code> header must say <code>26</code>.</p>
+  <p>Common mistake: counting characters by hand and getting 24 (treating the em dash as 1 byte). The test suite catches this by comparing the header value against the actual body byte count.</p>
+</div>
+
+<hr>
+
+<h2>H7: Common Compilation Warnings</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1 — Nudge</div>
+  <p>The most common warnings with <code>-Wall -Wextra -Werror</code> on socket code are: unused variables, unused parameters, implicit function declarations (missing <code>#include</code>), and sign comparison (<code>ssize_t</code> vs <code>size_t</code>). Read each warning message carefully — GCC tells exactly what's wrong and on which line.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2 — Stronger Push</div>
+
+  <table>
+    <tr><th>Warning</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td><code>implicit declaration of function 'close'</code></td><td>Missing <code>#include &lt;unistd.h&gt;</code></td><td>Add the include</td></tr>
+    <tr><td><code>unused variable 'buffer'</code></td><td>Declared but never used</td><td>Use it or remove it</td></tr>
+    <tr><td><code>unused parameter 'argc'</code></td><td><code>main(int argc, char *argv[])</code> but <code>argc</code> never read</td><td>Use <code>argc</code> for argument count checking</td></tr>
+    <tr><td><code>comparison of integers of different signs</code></td><td>Comparing <code>ssize_t</code> (signed) with <code>sizeof(...)</code> (unsigned)</td><td>Cast or use the correct type</td></tr>
+  </table>
+
+  <p>The typical includes for TRD-00:</p>
+<pre>#include &lt;stdio.h&gt;        // perror, fprintf
+#include &lt;stdlib.h&gt;       // exit, atoi
+#include &lt;string.h&gt;       // strlen, memset
+#include &lt;unistd.h&gt;       // read, write, close
+#include &lt;sys/socket.h&gt;   // socket, bind, listen, accept, setsockopt
+#include &lt;netinet/in.h&gt;   // struct sockaddr_in, INADDR_ANY, htons</pre>
+</div>
+
+<hr>
+
+<h2>General Debugging Tips</h2>
+
+<p><strong>Server starts but curl hangs:</strong> The server is probably not reading before writing. Some HTTP clients wait for the server to consume the request before accepting a response. Make sure <code>read()</code> is called before <code>write()</code>.</p>
+
+<p><strong><code>EADDRINUSE</code> on restart:</strong> Either a previous instance is still running (<code>lsof -i :&lt;port&gt;</code> to check, <code>kill &lt;pid&gt;</code> to fix), or <code>SO_REUSEADDR</code> isn't set. See H2.</p>
+
+<p><strong>Server works once, then hangs on second request:</strong> The accept loop is probably missing, or <code>close(client_fd)</code> isn't being called, or the code exits after the first response instead of looping.</p>
+
+<p><strong>Response body has extra garbage characters:</strong> The response string might be missing a null terminator, or <code>write()</code> is being told to send more bytes than the string contains. Use <code>strlen()</code> to compute write length, not a hardcoded number.</p>
+
+<p><strong>Tests pass but <code>curl -v</code> shows weird behavior:</strong> Run <code>strace ./conduit &lt;port&gt;</code> in one terminal and <code>curl -v</code> in another. The strace output shows every syscall, making it clear where the server is spending time or failing.</p>
+
+</body>
+</html>

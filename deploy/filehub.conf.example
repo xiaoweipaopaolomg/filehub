@@ -1,0 +1,12 @@
+# 复制到 /etc/filehub/filehub.conf 后按部署环境调整。
+# 修改超时和 access_log 后可用 systemctl reload filehub.service 热加载；
+# 端口、目录、线程数和容量限制发生变化时需要重启服务。
+listen_port=8080
+document_root=/srv/filehub
+worker_threads=4
+max_connections=256
+queue_limit=256
+request_timeout=10
+keepalive_timeout=30
+write_timeout=30
+access_log=1

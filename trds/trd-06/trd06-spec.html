@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-06: Hardening</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-06: Hardening</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-01–05 &nbsp;|&nbsp; Difficulty: Medium-Hard &nbsp;|&nbsp; Estimated: 4–6 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Make the server robust against malformed input, resource exhaustion, and ungraceful client behavior. After this TRD, the server should not crash under any hostile condition.</p>
+
+
+<h2>Technical Requirements</h2>
+
+<h3>R1 — SIGPIPE Suppression</h3>
+<p>Register <code>signal(SIGPIPE, SIG_IGN)</code> at startup. Verify that <code>write()</code> to a closed socket returns <code>-1</code>/<code>EPIPE</code> instead of killing the process.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Request Size Limit</h3>
+<p>If the read buffer fills (8 KB) without finding <code>\r\n\r\n</code>, return <strong>400 Bad Request</strong> and close the connection. Do not silently drop — the client must receive an error response.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R3 — Connection Count Tracking</h3>
+<p>Maintain an atomic or mutex-protected counter of active connections. When at capacity, stop calling <code>accept()</code> until connections close. Log when the limit is hit.</p>
+
+<h3>R4 — Idle Connection Timeout</h3>
+<p>Store a <code>last_active</code> timestamp on each connection. Use <code>epoll_wait()</code>'s timeout parameter (e.g., 1000ms) to periodically sweep and close connections idle longer than a threshold (default: 30 seconds, configurable via <code>#define</code>).</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R5 — Signal Handler</h3>
+<p>Install a <code>SIGINT</code>/<code>SIGTERM</code> handler using <code>sigaction()</code> that sets a <code>volatile sig_atomic_t</code> flag. The event loop checks this flag each iteration and initiates graceful shutdown. No non-async-signal-safe calls in the handler.</p>
+
+<h3>R6 — Error Discipline</h3>
+<p>Every <code>read()</code>, <code>write()</code>, <code>send()</code>, <code>open()</code>, <code>accept()</code>, <code>malloc()</code> return value must be checked. No silent failures. Connection-level errors close that connection — they must never crash the server.</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with strict flags + <code>-pthread</code></td><td>T1</td></tr>
+  <tr><td>2</td><td>Basic functionality still works</td><td>T2, T3</td></tr>
+  <tr><td>3</td><td>Oversized request headers → 400</td><td>T4</td></tr>
+  <tr><td>4</td><td>Server survives client disconnect (SIGPIPE)</td><td>T5</td></tr>
+  <tr><td>5</td><td>Server survives rapid connect/disconnect storm</td><td>T6</td></tr>
+  <tr><td>6</td><td>Malformed request barrage doesn't crash server</td><td>T7</td></tr>
+  <tr><td>7</td><td>Server functional after error barrage</td><td>T8</td></tr>
+  <tr><td>8</td><td>Mixed valid/invalid concurrent requests</td><td>T9</td></tr>
+  <tr><td>9</td><td><code>SIGTERM</code> → clean exit</td><td>T10</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>Why is <code>SIGPIPE</code> fatal by default? What design assumption does that reflect?</li>
+  <li>Why must the signal handler use <code>volatile sig_atomic_t</code> instead of a plain <code>int</code>?</li>
+  <li>The connection idle timeout (R6) requires evicting clients that have been silent for 30 seconds. How is this implemented without blocking the epoll event loop? Your answer should address both how the sweep is scheduled and why the sweep itself is non-blocking.</li>
+  <li>What is a slowloris attack and which requirement in this TRD defends against it?</li>
+</ol>
+
+
+<h2>Preview: TRD-07</h2>
+<p>The server is complete. TRD-07 measures it: benchmarking with <code>wrk</code>, memory leak auditing with <code>valgrind</code>, and writing the README that positions Conduit as a portfolio artifact. No new code — just measurement, documentation, and honest framing of results.</p>
+
+
+<div class="footer">
+  Conduit TRD-06 &nbsp;|&nbsp; Hardening &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

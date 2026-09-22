@@ -1,0 +1,8 @@
+.vscode
+filehub
+filehub-asan
+filehub-tsan
+unit_tests
+*.o
+*.d
+.gdbinit

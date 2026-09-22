@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-03 Prior Knowledge: HTTP Response Engine</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 28px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .diagram { border: 1.5px solid #000; padding: 14px; margin: 14px 0; text-align: center; page-break-inside: avoid; }
+  .diagram-caption { font-size: 8.5pt; font-style: italic; text-align: center; margin-top: 6px; }
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-03 Prior Knowledge</h1>
+  <div class="subtitle">HTTP Response Engine — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-02 complete (static file serving, MIME types, traversal prevention)</div>
+</div>
+
+
+<h2>1 &nbsp; Why a Response Engine?</h2>
+
+<p>After TRD-02, the server has <code>snprintf()</code> calls scattered across every code path — one for 200, one for 404, one for 403, one for 405, one for 400. Each manually constructs the status line, headers, and body. This has three problems:</p>
+
+<ul>
+  <li><strong>Duplication.</strong> Every response path repeats the same serialization logic. A bug in CRLF placement must be fixed in five places.</li>
+  <li><strong>Fragility.</strong> Adding a new header (which TRD-04+ will require) means touching every code path.</li>
+  <li><strong>Unclear ownership.</strong> Who allocates the body buffer? Who frees it? With ad-hoc construction, the answer varies by code path.</li>
+</ul>
+
+<p>The response engine solves this: a struct holds the response data, a small set of functions populate it, and a single <code>response_send()</code> function serializes everything to the socket. Every response — success or error — flows through the same codepath.</p>
+
+<div class="diagram">
+  <svg viewBox="0 0 660 160" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, serif" font-size="10">
+    <!-- Before -->
+    <text x="150" y="15" text-anchor="middle" font-weight="bold" font-size="11">Before (TRD-02)</text>
+    <rect x="20" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="60" y="43" text-anchor="middle" font-size="8">200 path</text>
+    <rect x="110" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="150" y="43" text-anchor="middle" font-size="8">404 path</text>
+    <rect x="200" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="240" y="43" text-anchor="middle" font-size="8">403 path</text>
+
+    <text x="60" y="70" text-anchor="middle" font-size="7" font-style="italic">snprintf()</text>
+    <text x="150" y="70" text-anchor="middle" font-size="7" font-style="italic">snprintf()</text>
+    <text x="240" y="70" text-anchor="middle" font-size="7" font-style="italic">snprintf()</text>
+
+    <line x1="60" y1="53" x2="60" y2="62" stroke="#000" stroke-width="1"/>
+    <line x1="150" y1="53" x2="150" y2="62" stroke="#000" stroke-width="1"/>
+    <line x1="240" y1="53" x2="240" y2="62" stroke="#000" stroke-width="1"/>
+
+    <line x1="60" y1="75" x2="60" y2="85" stroke="#000" stroke-width="1" marker-end="url(#a3)"/>
+    <line x1="150" y1="75" x2="150" y2="85" stroke="#000" stroke-width="1" marker-end="url(#a3)"/>
+    <line x1="240" y1="75" x2="240" y2="85" stroke="#000" stroke-width="1" marker-end="url(#a3)"/>
+
+    <rect x="20" y="85" width="80" height="24" fill="none" stroke="#000" stroke-width="1"/>
+    <text x="60" y="101" text-anchor="middle" font-size="7">write(fd)</text>
+    <rect x="110" y="85" width="80" height="24" fill="none" stroke="#000" stroke-width="1"/>
+    <text x="150" y="101" text-anchor="middle" font-size="7">write(fd)</text>
+    <rect x="200" y="85" width="80" height="24" fill="none" stroke="#000" stroke-width="1"/>
+    <text x="240" y="101" text-anchor="middle" font-size="7">write(fd)</text>
+
+    <!-- Arrow -->
+    <line x1="310" y1="65" x2="350" y2="65" stroke="#000" stroke-width="2" marker-end="url(#a3)"/>
+
+    <!-- After -->
+    <text x="510" y="15" text-anchor="middle" font-weight="bold" font-size="11">After (TRD-03)</text>
+    <rect x="380" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="420" y="43" text-anchor="middle" font-size="8">200 path</text>
+    <rect x="470" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="510" y="43" text-anchor="middle" font-size="8">404 path</text>
+    <rect x="560" y="25" width="80" height="28" fill="none" stroke="#000" stroke-width="1.5"/>
+    <text x="600" y="43" text-anchor="middle" font-size="8">403 path</text>
+
+    <line x1="420" y1="53" x2="510" y2="75" stroke="#000" stroke-width="1"/>
+    <line x1="510" y1="53" x2="510" y2="75" stroke="#000" stroke-width="1"/>
+    <line x1="600" y1="53" x2="510" y2="75" stroke="#000" stroke-width="1"/>
+
+    <rect x="450" y="75" width="120" height="30" fill="none" stroke="#000" stroke-width="2"/>
+    <text x="510" y="95" text-anchor="middle" font-weight="bold" font-size="9">response_send()</text>
+
+    <line x1="510" y1="105" x2="510" y2="120" stroke="#000" stroke-width="1.5" marker-end="url(#a3)"/>
+
+    <rect x="470" y="120" width="80" height="24" fill="none" stroke="#000" stroke-width="1"/>
+    <text x="510" y="136" text-anchor="middle" font-size="7">write(fd)</text>
+
+    <defs><marker id="a3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#000"/></marker></defs>
+  </svg>
+  <div class="diagram-caption">Figure 1 — Before: duplicated serialization per path. After: single response engine.</div>
+</div>
+
+
+<h2>2 &nbsp; Struct-Based API Design in C</h2>
+
+<p>C doesn't have classes, but the pattern of "struct + functions that operate on it" is the standard way to build reusable abstractions. The response engine follows this pattern:</p>
+
+<pre>/* The struct holds response data */
+typedef struct { ... } http_response_t;
+
+/* Functions populate it */
+void response_set_status(http_response_t *resp, int code, const char *reason);
+void response_add_header(http_response_t *resp, const char *key, const char *value);
+void response_set_body(http_response_t *resp, const char *body, int length);
+
+/* One function serializes and sends */
+int response_send(int fd, http_response_t *resp);</pre>
+
+<p>Every function takes a pointer to the struct as its first argument — this is the C equivalent of <code>this</code> or <code>self</code>. The struct is initialized by the caller, populated through the API, sent, and then cleaned up.</p>
+
+
+<h2>3 &nbsp; Memory Ownership</h2>
+
+<p>This is the hardest conceptual problem in TRD-03. When the response body is a file read from disk (TRD-02), someone <code>malloc()</code>'d a buffer. Questions:</p>
+
+<ul>
+  <li>Does <code>response_set_body()</code> copy the data into the struct, or just store a pointer?</li>
+  <li>If it stores a pointer, who frees the buffer — the caller or <code>response_send()</code>?</li>
+  <li>What about error bodies like <code>"Not Found"</code> — those are string literals (static memory). Calling <code>free()</code> on them would crash.</li>
+</ul>
+
+<p>There are two clean approaches:</p>
+
+<table>
+  <tr>
+    <th style="width:160px;">Approach</th>
+    <th>How it works</th>
+    <th style="width:160px;">Trade-off</th>
+  </tr>
+  <tr>
+    <td><strong>Pointer + flag</strong></td>
+    <td>Store a pointer to the body and a boolean <code>body_owned</code>. If owned, <code>response_send()</code> or a cleanup function frees it. If not owned (string literal), it's left alone.</td>
+    <td>Flexible, slightly more complex</td>
+  </tr>
+  <tr>
+    <td><strong>Always copy</strong></td>
+    <td><code>response_set_body()</code> always <code>malloc()</code>s and <code>memcpy()</code>s. A cleanup function always frees.</td>
+    <td>Simpler ownership, wastes memory for small static strings</td>
+  </tr>
+</table>
+
+<p>Either works. The important thing is that the rule is <strong>consistent</strong> — every code path must follow the same ownership convention, or you will have use-after-free bugs or double-free bugs. Pick one approach and enforce it everywhere.</p>
+
+<div class="callout">
+  <strong>Why this matters beyond Conduit:</strong> Memory ownership is the single most common source of bugs in C/C++ systems code. In a FAANG systems interview, being able to articulate "this struct owns its body buffer and frees it in the cleanup function" demonstrates the kind of thinking that separates junior from mid-level systems engineers.
+</div>
+
+
+<h2>4 &nbsp; Serialization to Wire Format</h2>
+
+<p>The response on the wire looks like:</p>
+
+<pre>HTTP/1.1 200 OK\r\n
+Content-Type: text/html\r\n
+Content-Length: 45\r\n
+\r\n
+&lt;html&gt;&lt;body&gt;Hello&lt;/body&gt;&lt;/html&gt;</pre>
+
+<p><code>response_send()</code> must produce this byte sequence from the struct. The order is fixed: status line → headers → blank line → body. The blank line (<code>\r\n</code>) separating headers from body is mandatory and easy to forget.</p>
+
+<p>Two implementation strategies:</p>
+<ul>
+  <li><strong>Build one big buffer</strong> with <code>snprintf()</code>, then <code>write()</code> once. Simple, but requires knowing the total size upfront.</li>
+  <li><strong>Write in pieces</strong>: <code>write()</code> the status line, then each header, then <code>\r\n</code>, then the body. More <code>write()</code> calls but no allocation needed for the serialized headers.</li>
+</ul>
+
+<p>For TRD-03 (still single-threaded, blocking I/O), either works. TRD-04 will impose constraints that favor buffering the full response — but don't over-engineer for that now.</p>
+
+
+<h2>5 &nbsp; Status Code Reference</h2>
+
+<table>
+  <tr><th style="width:60px;">Code</th><th style="width:180px;">Reason Phrase</th><th>When Conduit sends it</th></tr>
+  <tr><td>200</td><td>OK</td><td>File found and served successfully</td></tr>
+  <tr><td>400</td><td>Bad Request</td><td>Malformed request line or headers</td></tr>
+  <tr><td>403</td><td>Forbidden</td><td>Path traversal attempt or file permission denied</td></tr>
+  <tr><td>404</td><td>Not Found</td><td>File does not exist in docroot</td></tr>
+  <tr><td>405</td><td>Method Not Allowed</td><td>Non-GET method</td></tr>
+  <tr><td>500</td><td>Internal Server Error</td><td>Unexpected failure during response construction (malloc failure, read error mid-file)</td></tr>
+</table>
+
+
+<h2>6 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Primary</div>
+  <ul>
+    <li>RFC 9112 §6 — Response message format</li>
+    <li>RFC 9110 §15 — Status codes and their semantics</li>
+    <li><code>man 3 malloc</code>, <code>man 3 free</code>, <code>man 3 memcpy</code></li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Supplementary</div>
+  <ul>
+    <li><code>man 3 snprintf</code> — returns the number of bytes that <em>would have been written</em>, useful for pre-computing buffer sizes</li>
+    <li>Valgrind quick start — <a href="https://valgrind.org/docs/manual/quick-start.html">valgrind.org</a> — run early, catch leaks before they compound</li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-03 Prior Knowledge &nbsp;|&nbsp; HTTP Response Engine &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

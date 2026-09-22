@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-07 Prior Knowledge: Benchmarking &amp; Documentation</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 28px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-07 Prior Knowledge</h1>
+  <div class="subtitle">Benchmarking &amp; Documentation — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-06 complete (hardened server) &nbsp;|&nbsp; Final TRD</div>
+</div>
+
+<p>No new server code. This TRD is about measuring what was built, checking it doesn't leak, and writing the documentation that makes it a portfolio artifact. The deliverables are data, prose, and a clean repo — not a new feature.</p>
+
+
+<h2>1 &nbsp; Benchmarking with <code>wrk</code></h2>
+
+<p><code>wrk</code> is an HTTP benchmarking tool. It opens many connections to the server, sends requests as fast as possible, and reports throughput and latency.</p>
+
+<pre>wrk -t2 -c10 -d10s http://localhost:9876/index.html</pre>
+
+<table>
+  <tr><th style="width:80px;">Flag</th><th>Meaning</th></tr>
+  <tr><td><code>-t2</code></td><td>Use 2 threads inside wrk (not the server's threads)</td></tr>
+  <tr><td><code>-c10</code></td><td>Keep 10 connections open simultaneously</td></tr>
+  <tr><td><code>-d10s</code></td><td>Run for 10 seconds</td></tr>
+</table>
+
+<p>Key metrics in the output:</p>
+<ul>
+  <li><strong>Requests/sec</strong> — throughput. Higher is better.</li>
+  <li><strong>Latency (Avg, p50, p99)</strong> — response time. Lower is better. p99 means "99% of requests completed within this time." p99 matters more than average for servers because outliers indicate performance cliffs.</li>
+  <li><strong>Transfer/sec</strong> — bytes throughput. Depends on response size, less useful for comparison.</li>
+</ul>
+
+<h3>1.1 &nbsp; Methodology</h3>
+<ul>
+  <li><strong>Warm up</strong> — run wrk once for 5 seconds before recording. The first run fills caches and stabilizes thread pools.</li>
+  <li><strong>Multiple trials</strong> — run each configuration 3 times, report the median.</li>
+  <li><strong>Control variables</strong> — same machine, same file, same wrk thread count. Only vary connection count.</li>
+  <li><strong>Concurrency levels</strong> — test at 1, 10, 50, and 100 connections to show how the server scales.</li>
+</ul>
+
+<div class="callout">
+  <strong>Install wrk:</strong> On Ubuntu/Debian: <code>sudo apt install wrk</code>. On macOS: <code>brew install wrk</code>. From source: <a href="https://github.com/wg/wrk">github.com/wg/wrk</a>.
+</div>
+
+
+<h2>2 &nbsp; Comparison Baseline</h2>
+
+<p>Benchmarking in isolation means nothing — numbers need context. Compare Conduit against Python's built-in <code>http.server</code> serving the same file:</p>
+
+<pre>cd /path/to/docroot &amp;&amp; python3 -m http.server 8080</pre>
+
+<p>Then run the same <code>wrk</code> tests against <code>http://localhost:8080/index.html</code>. Python's server is single-threaded and blocking — Conduit should outperform it significantly. This comparison is fair and demonstrates real gains.</p>
+
+<p>A comparison against nginx is optional and educational, but must be framed honestly: nginx is a production-grade server with decades of optimization. Conduit losing to nginx at high concurrency is expected and fine.</p>
+
+
+<h2>3 &nbsp; Valgrind Memory Audit</h2>
+
+<pre>valgrind --leak-check=full --show-leak-kinds=all ./conduit 9876 ./docroot</pre>
+
+<p>Send several requests (mix of 200, 404, 405), then send <code>SIGTERM</code>. Check valgrind's summary:</p>
+
+<ul>
+  <li><strong>"definitely lost: 0 bytes"</strong> — the target. No memory that was allocated and never freed.</li>
+  <li><strong>"still reachable"</strong> — memory still pointed to at exit. Usually harmless (global data, not-yet-freed pools). Acceptable for Conduit.</li>
+  <li><strong>"indirectly lost"</strong> — memory lost because the pointer to it was lost. Fix these — they indicate a real leak chain.</li>
+</ul>
+
+<div class="callout">
+  <strong>Install valgrind:</strong> <code>sudo apt install valgrind</code>. Note: valgrind slows the server ~10–20x. Use short benchmarks and low concurrency when testing under valgrind.
+</div>
+
+
+<h2>4 &nbsp; README Structure</h2>
+
+<p>A systems project README is a technical document, not marketing copy. Required sections:</p>
+
+<table>
+  <tr><th style="width:180px;">Section</th><th>Content</th></tr>
+  <tr><td>Project Summary</td><td>One paragraph: what it is, what it does, what technologies it uses.</td></tr>
+  <tr><td>Architecture</td><td>High-level description of the event loop, thread pool, and request pipeline. An ASCII or SVG diagram is ideal.</td></tr>
+  <tr><td>Build &amp; Run</td><td><code>gcc</code> command, how to run, command-line arguments.</td></tr>
+  <tr><td>Benchmark Results</td><td>Table of req/sec and p99 at each concurrency level. Methodology notes. Comparison baseline. Hardware specs.</td></tr>
+  <tr><td>Design Decisions</td><td>Why epoll over poll/select. Why edge-triggered. Why fixed thread pool. These show engineering thinking.</td></tr>
+  <tr><td>Known Limitations</td><td>What it doesn't do (HTTP/1.1 pipelining, TLS, chunked encoding, etc.). Honesty is more impressive than omission.</td></tr>
+</table>
+
+
+<h2>5 &nbsp; Honest Framing</h2>
+
+<p>Benchmark results on a dev laptop over loopback eliminate network latency entirely, inflating req/sec. Frame results as:</p>
+
+<p><em>"Throughput measured under N concurrent connections on local loopback, [CPU model], [RAM]. These numbers reflect server-side processing capacity, not real-world performance over a network."</em></p>
+
+<p>Recruiters who know systems will respect this framing. Inflated claims ("10x faster than nginx") will be spotted and damage credibility.</p>
+
+
+<h2>6 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Tools</div>
+  <ul>
+    <li><strong>wrk</strong> — <a href="https://github.com/wg/wrk">github.com/wg/wrk</a></li>
+    <li><strong>Valgrind</strong> — <a href="https://valgrind.org/docs/manual/quick-start.html">valgrind.org quick start</a></li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Reference</div>
+  <ul>
+    <li><strong>Brendan Gregg — Systems Performance</strong> — benchmarking methodology chapters</li>
+    <li><strong>GitHub README best practices</strong> — <a href="https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes">docs.github.com</a></li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-07 Prior Knowledge &nbsp;|&nbsp; Benchmarking &amp; Documentation &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

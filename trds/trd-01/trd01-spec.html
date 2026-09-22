@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-01: HTTP/1.1 Request Parsing</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-01: HTTP/1.1 Request Parsing</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-00 &nbsp;|&nbsp; Difficulty: Medium &nbsp;|&nbsp; Estimated: 4–7 sessions</div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>Objective</h2>
+<p>Parse the HTTP request line and headers from raw TCP bytes into a structured <code>http_request_t</code>. Route by method and path. Return correct status codes for valid, malformed, and unsupported requests.</p>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>Technical Requirements</h2>
+
+<h3>R1 — Request Struct</h3>
+<p>Define an <code>http_request_t</code> struct containing: method, path, HTTP version, an array of header key-value pairs, and a header count.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Request Line Parsing</h3>
+<p>Extract method, URI, and HTTP version from the first line of the request. The format is <code>METHOD SP URI SP VERSION CRLF</code>. Only <code>HTTP/1.1</code> is accepted as a valid version.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R3 — Header Parsing</h3>
+<p>Parse each subsequent line as a <code>Key: Value</code> header pair until a bare <code>\r\n</code> is encountered (marking the end of the header block). Store parsed headers in the request struct.</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R4 — End-of-Headers Detection</h3>
+<p>Accumulate bytes from <code>read()</code> into a buffer. After each read, check for the <code>\r\n\r\n</code> sequence. Do not attempt to parse until the full header block has arrived. Handle the partial-read case (see Prior Knowledge §2).</p>
+<span class="hint-ref">Stuck? → Hints H4</span>
+
+<h3>R5 — Status Code Routing</h3>
+<ul>
+  <li><strong>200 OK</strong> — Valid <code>GET</code> request to <code>/</code> (return a hardcoded plain-text body)</li>
+  <li><strong>400 Bad Request</strong> — Malformed request line (missing fields, bad version, garbage input)</li>
+  <li><strong>404 Not Found</strong> — Valid <code>GET</code> to any path other than <code>/</code></li>
+  <li><strong>405 Method Not Allowed</strong> — Any non-<code>GET</code> method</li>
+</ul>
+<span class="hint-ref">Stuck? → Hints H5</span>
+
+<h3>R6 — Response Format</h3>
+<p>All responses must include: a valid HTTP/1.1 status line, a <code>Content-Type</code> header, a <code>Content-Length</code> header whose value matches the actual body byte count, and the body (which may be empty for error responses, or a short error message). This is still ad-hoc construction — the response engine comes in TRD-03.</p>
+<span class="hint-ref">Stuck? → Hints H6</span>
+
+<h3>R7 — Server Loop</h3>
+<p>The server must continue accepting and handling new connections after each request (same accept loop as TRD-00). One connection, one request, one response, close, loop.</p>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:80px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with <code>-Wall -Wextra -Werror -pedantic -std=c11</code></td><td>T1</td></tr>
+  <tr><td>2</td><td><code>GET /</code> returns HTTP 200 with non-empty body</td><td>T2, T3</td></tr>
+  <tr><td>3</td><td><code>GET /nonexistent</code> returns HTTP 404</td><td>T4</td></tr>
+  <tr><td>4</td><td><code>POST /</code> and <code>DELETE /</code> return HTTP 405</td><td>T5, T6</td></tr>
+  <tr><td>5</td><td>Malformed request line (missing version, garbage) returns 400</td><td>T7, T8</td></tr>
+  <tr><td>6</td><td>Wrong HTTP version returns 400</td><td>T9</td></tr>
+  <tr><td>7</td><td>Extra headers do not break parsing</td><td>T10</td></tr>
+  <tr><td>8</td><td>Multiple sequential requests succeed</td><td>T11</td></tr>
+  <tr><td>9</td><td>Response includes <code>Content-Type</code> and correct <code>Content-Length</code></td><td>T12, T13</td></tr>
+</table>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>Post-Completion Comprehension</h2>
+
+<p>Answer these before requesting TRD-02. Write them out — don't just think "I know this."</p>
+
+<ol>
+  <li>Why can't a single <code>read()</code> be assumed to contain a complete HTTP request?</li>
+  <li>What does <code>\r\n\r\n</code> signify and why is it the correct sentinel for "headers are done"?</li>
+  <li>Why use <code>strtok_r()</code> instead of <code>strtok()</code>? What will break later if you use the non-reentrant version?</li>
+  <li>A header like <code>Host: localhost:9876</code> has a colon in the value. How does the parser handle this?</li>
+  <li>What happens to the connection if the server receives a partial request and never gets the rest? (Think about what TRD-06 will fix.)</li>
+  <li>Why does the test suite send raw bytes via <code>nc</code> for malformed-request tests instead of using <code>curl</code>?</li>
+</ol>
+
+
+<!-- ════════════════════════════════════════ -->
+<h2>Preview: TRD-02</h2>
+
+<p>The server currently returns hardcoded text. TRD-02 replaces this with real file serving: mapping URI paths to filesystem paths, reading files with <code>open()</code>/<code>fstat()</code>/<code>read()</code>, setting <code>Content-Type</code> from file extensions, and blocking directory traversal attacks. The parsed <code>path</code> field from TRD-01's <code>http_request_t</code> becomes the input to the file resolver.</p>
+
+
+<div class="footer">
+  Conduit TRD-01 &nbsp;|&nbsp; HTTP/1.1 Request Parsing &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

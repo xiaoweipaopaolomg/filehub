@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-02: Static File Serving</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #000;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-02: Static File Serving</h1>
+  <div class="subtitle">Conduit HTTP Server Project</div>
+  <div class="meta">Depends on: TRD-01 &nbsp;|&nbsp; Difficulty: Medium &nbsp;|&nbsp; Estimated: 4–6 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Serve files from a document root directory. Map URI paths to filesystem paths, read file contents, set correct MIME types, and block directory traversal attacks.</p>
+
+
+<h2>Interface Change</h2>
+<pre>./conduit &lt;port&gt; &lt;docroot&gt;</pre>
+<p>Both arguments required. Exit with code 1 and a usage message to stderr if either is missing.</p>
+
+
+<h2>Technical Requirements</h2>
+
+<h3>R1 — Path Resolution</h3>
+<p>Construct a filesystem path from the document root and the request URI. <code>GET /</code> maps to <code>&lt;docroot&gt;/index.html</code>. All other paths map to <code>&lt;docroot&gt; + path</code>.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>R2 — Directory Traversal Prevention</h3>
+<p>Resolve the constructed path with <code>realpath()</code>. Verify the resolved path begins with the document root prefix. If it does not, return <strong>403 Forbidden</strong>. Do not rely on checking for <code>..</code> in the raw URI.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>R3 — File Reading</h3>
+<p>Open the resolved file with <code>open()</code>. Get its size with <code>fstat()</code>. Read the full contents into a buffer. Close the fd. If <code>open()</code> fails with <code>ENOENT</code>, return <strong>404</strong>. Set <code>Content-Length</code> to the file size from <code>fstat()</code>.</p>
+<span class="hint-ref">Stuck? → Hints H3</span>
+
+<h3>R4 — MIME Type Mapping</h3>
+<p>Set <code>Content-Type</code> based on the file extension. Required mappings:</p>
+<table>
+  <tr><th>Extension</th><th>Content-Type</th></tr>
+  <tr><td><code>.html</code></td><td><code>text/html</code></td></tr>
+  <tr><td><code>.css</code></td><td><code>text/css</code></td></tr>
+  <tr><td><code>.js</code></td><td><code>application/javascript</code></td></tr>
+  <tr><td><code>.txt</code></td><td><code>text/plain</code></td></tr>
+  <tr><td><code>.jpg</code></td><td><code>image/jpeg</code></td></tr>
+  <tr><td><code>.png</code></td><td><code>image/png</code></td></tr>
+  <tr><td>(other/none)</td><td><code>application/octet-stream</code></td></tr>
+</table>
+<span class="hint-ref">Stuck? → Hints H4</span>
+
+<h3>R5 — Subdirectory Serving</h3>
+<p>Paths like <code>/subdir/page.html</code> must resolve correctly to <code>&lt;docroot&gt;/subdir/page.html</code>. No special handling required beyond correct path concatenation — but verify it works.</p>
+
+<h3>R6 — Error Responses</h3>
+<p>All error responses (400, 403, 404, 405) must still include valid HTTP headers and a short plain-text body describing the error. Carry forward TRD-01 behavior for 400 (malformed) and 405 (wrong method).</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles with strict flags</td><td>T1</td></tr>
+  <tr><td>2</td><td>Exits with error when docroot argument missing</td><td>T2</td></tr>
+  <tr><td>3</td><td><code>GET /</code> serves <code>index.html</code> from docroot</td><td>T3</td></tr>
+  <tr><td>4</td><td><code>GET /test.html</code> returns 200</td><td>T4</td></tr>
+  <tr><td>5</td><td><code>.css</code> served with <code>text/css</code></td><td>T5</td></tr>
+  <tr><td>6</td><td><code>.js</code> served with <code>application/javascript</code></td><td>T6</td></tr>
+  <tr><td>7</td><td><code>.txt</code> served with <code>text/plain</code></td><td>T7</td></tr>
+  <tr><td>8</td><td>Nonexistent file returns 404</td><td>T8</td></tr>
+  <tr><td>9</td><td>Directory traversal returns 403</td><td>T9, T10</td></tr>
+  <tr><td>10</td><td><code>Content-Length</code> matches file size on disk</td><td>T11</td></tr>
+  <tr><td>11</td><td>Subdirectory file serving works</td><td>T12</td></tr>
+  <tr><td>12</td><td>Response body matches file contents on disk</td><td>T13</td></tr>
+  <tr><td>13</td><td>Sequential requests for different files succeed</td><td>T14</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>Why is checking for <code>..</code> in the raw URI insufficient to prevent directory traversal?</li>
+  <li>What does <code>realpath()</code> return if the target file does not exist?</li>
+  <li>Why use <code>fstat()</code> on an open fd rather than <code>stat()</code> on the path? (Think about race conditions.)</li>
+  <li>What happens if <code>read()</code> returns fewer bytes than <code>st_size</code>? Is the file corrupt, or is something else going on?</li>
+  <li>Why does <code>.jpg</code> map to <code>image/jpeg</code> and not <code>image/jpg</code>?</li>
+</ol>
+
+
+<h2>Preview: TRD-03</h2>
+<p>Response construction is currently ad-hoc — <code>snprintf()</code> calls scattered across the routing logic. TRD-03 extracts this into a reusable <code>http_response_t</code> struct with functions for setting status, adding headers, attaching a body, and serializing to the socket. Every response path will flow through a single engine.</p>
+
+
+<div class="footer">
+  Conduit TRD-02 &nbsp;|&nbsp; Static File Serving &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

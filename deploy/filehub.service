@@ -1,0 +1,36 @@
+[Unit]
+Description=FileHub local file distribution service
+After=network.target
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# 使用无登录权限账户运行，站点目录只需授予读取权限。
+User=www-data
+Group=www-data
+ExecStart=/usr/local/bin/filehub --config /etc/filehub/filehub.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=7
+UMask=0027
+# 以下沙箱选项限制提权、主目录、设备和内核接口访问。
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6
+# 清空 capability 集合；默认端口 8080 不需要特权绑定能力。
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

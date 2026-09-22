@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-03 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-03 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push &nbsp;|&nbsp; 15+ minutes before escalating</div>
+</div>
+
+
+<h2>H1 — Response Struct Design (R1)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Think about what <code>response_send()</code> needs to write. It needs a status code, a reason string, some number of headers, and optionally a body. The struct should hold exactly this data. For the body, you need both a pointer and a length — you can't use <code>strlen()</code> because binary file data (images) may contain null bytes.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>typedef struct {
+    int status_code;
+    char reason[32];
+    struct {
+        char key[128];
+        char value[512];
+    } headers[16];
+    int header_count;
+    const char *body;
+    int body_length;
+    int body_owned;   /* 1 = free(body) on cleanup, 0 = don't */
+} http_response_t;</pre>
+  <p><code>body_owned</code> solves the ownership problem. Set to 1 when body is <code>malloc</code>'d (file data), set to 0 when body is a string literal ("Not Found").</p>
+</div>
+
+
+<h2>H2 — Population API (R2)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Each function is short — it just copies data into the struct fields. <code>response_add_header()</code> copies key and value into <code>headers[header_count]</code> and increments the count. The automatic <code>Content-Length</code> can be added inside <code>response_send()</code> right before serialization rather than during population.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void response_set_status(http_response_t *r, int code, const char *reason) {
+    r-&gt;status_code = code;
+    strncpy(r-&gt;reason, reason, sizeof(r-&gt;reason) - 1);
+    r-&gt;reason[sizeof(r-&gt;reason) - 1] = '\0';
+}
+
+void response_add_header(http_response_t *r, const char *key, const char *val) {
+    if (r-&gt;header_count &gt;= 16) return;  /* silent cap */
+    strncpy(r-&gt;headers[r-&gt;header_count].key, key, 127);
+    strncpy(r-&gt;headers[r-&gt;header_count].value, val, 511);
+    r-&gt;header_count = r-&gt;header_count + 1;
+}
+
+void response_set_body(http_response_t *r, const char *data, int len, int owned) {
+    r-&gt;body = data;
+    r-&gt;body_length = len;
+    r-&gt;body_owned = owned;
+}</pre>
+</div>
+
+
+<h2>H3 — Serialization (R3)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Build the response in order: status line, then each header line, then the blank line, then the body. You can either build one big buffer or write in multiple <code>write()</code> calls. Remember to add <code>Content-Length</code> from <code>body_length</code> — this is the automatic part the caller shouldn't have to do.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>int response_send(int fd, http_response_t *r) {
+    char header_buf[4096];
+    int off = 0;
+
+    /* Status line */
+    off += snprintf(header_buf + off, sizeof(header_buf) - off,
+        "HTTP/1.1 %d %s\r\n", r-&gt;status_code, r-&gt;reason);
+
+    /* Headers from struct */
+    for (int i = 0; i &lt; r-&gt;header_count; i++) {
+        off += snprintf(header_buf + off, sizeof(header_buf) - off,
+            "%s: %s\r\n", r-&gt;headers[i].key, r-&gt;headers[i].value);
+    }
+
+    /* Auto Content-Length */
+    off += snprintf(header_buf + off, sizeof(header_buf) - off,
+        "Content-Length: %d\r\n", r-&gt;body_length);
+
+    /* Blank line */
+    off += snprintf(header_buf + off, sizeof(header_buf) - off, "\r\n");
+
+    /* Write headers */
+    if (write(fd, header_buf, off) != off) return -1;
+
+    /* Write body */
+    if (r-&gt;body &amp;&amp; r-&gt;body_length &gt; 0) {
+        if (write(fd, r-&gt;body, r-&gt;body_length) != r-&gt;body_length) return -1;
+    }
+    return 0;
+}</pre>
+  <p>Note: <code>write()</code> can return fewer bytes than requested even for blocking sockets under memory pressure. For TRD-03 this is rare enough to ignore. TRD-04 will handle partial writes properly.</p>
+</div>
+
+
+<h2>H4 — Memory Cleanup (R4)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>The cleanup function checks the ownership flag. If the body is owned (dynamically allocated), free it. If not (string literal), leave it alone. Always reset the struct to a clean state so it can't accidentally be double-freed.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void response_cleanup(http_response_t *r) {
+    if (r-&gt;body_owned &amp;&amp; r-&gt;body) {
+        free((void *)r-&gt;body);
+    }
+    r-&gt;body = NULL;
+    r-&gt;body_length = 0;
+    r-&gt;body_owned = 0;
+    r-&gt;header_count = 0;
+}</pre>
+  <p>The <code>(void *)</code> cast is needed because <code>body</code> is <code>const char *</code> and <code>free()</code> takes <code>void *</code>. Setting <code>body = NULL</code> after free prevents use-after-free if cleanup is accidentally called twice.</p>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-03 Hints &nbsp;|&nbsp; HTTP Response Engine &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

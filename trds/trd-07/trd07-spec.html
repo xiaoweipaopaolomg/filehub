@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-07: Benchmarking &amp; Documentation</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 14px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hint-ref { border: 1px solid #000; padding: 3px 8px; margin: 6px 0; font-size: 9pt; font-style: italic; display: inline-block; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-07: Benchmarking &amp; Documentation</h1>
+  <div class="subtitle">Conduit HTTP Server Project — Final TRD</div>
+  <div class="meta">Depends on: TRD-01–06 &nbsp;|&nbsp; Difficulty: Low-Medium &nbsp;|&nbsp; Estimated: 3–5 sessions</div>
+</div>
+
+
+<h2>Objective</h2>
+<p>Measure the server's performance honestly, verify it doesn't leak memory, write a professional README, and finalize the repository as a portfolio artifact.</p>
+
+
+<h2>Deliverables</h2>
+
+<h3>D1 — Benchmark Data</h3>
+<p>Run <code>wrk</code> against Conduit at concurrency levels 1, 10, 50, and 100. Record req/sec and p99 latency for each. Run 3 trials per level, report the median. Include a warm-up run before recording.</p>
+<span class="hint-ref">Stuck? → Hints H1</span>
+
+<h3>D2 — Baseline Comparison</h3>
+<p>Run the same <code>wrk</code> tests against Python <code>http.server</code> serving the same file. Produce a comparison table. Frame results honestly (see Prior Knowledge §5).</p>
+
+<h3>D3 — Valgrind Memcheck</h3>
+<p>Run the server under <code>valgrind --leak-check=full</code>. Send a mix of valid and invalid requests. Send <code>SIGTERM</code>. Confirm <strong>0 bytes definitely lost</strong>. Fix any leaks found.</p>
+<span class="hint-ref">Stuck? → Hints H2</span>
+
+<h3>D4 — README.md</h3>
+<p>Write a README with these sections:</p>
+<ol>
+  <li><strong>Project Summary</strong> — what Conduit is, what it does, tech stack</li>
+  <li><strong>Architecture</strong> — event loop, thread pool, request pipeline. Include a diagram.</li>
+  <li><strong>Build &amp; Run</strong> — exact commands to compile and start the server</li>
+  <li><strong>Benchmark Results</strong> — table with req/sec and p99 at each concurrency level, comparison to baseline, hardware specs, methodology notes</li>
+  <li><strong>Design Decisions</strong> — why epoll, why edge-triggered, why fixed thread pool, why the response engine abstraction</li>
+  <li><strong>Known Limitations</strong> — what Conduit does not support (pipelining, TLS, chunked encoding, HTTP/2, etc.)</li>
+</ol>
+
+<h3>D5 — Repository Cleanup</h3>
+<p>Confirm the repo is clean: no build artifacts committed, <code>.gitignore</code> present, code compiles from a fresh clone, README renders correctly on GitHub. Tag the final commit.</p>
+
+
+<h2>Acceptance Criteria</h2>
+
+<table>
+  <tr><th style="width:30px;">#</th><th>Criterion</th><th style="width:70px;">Test</th></tr>
+  <tr><td>1</td><td>Compiles from clean source</td><td>T1</td></tr>
+  <tr><td>2</td><td>Server starts and serves (sanity)</td><td>T2</td></tr>
+  <tr><td>3</td><td>Valgrind reports 0 bytes definitely lost</td><td>T3</td></tr>
+  <tr><td>4</td><td><code>wrk</code> benchmark completes at all concurrency levels</td><td>T4</td></tr>
+  <tr><td>5</td><td>Benchmark results saved to file</td><td>T5</td></tr>
+  <tr><td>6</td><td><code>README.md</code> exists with all required sections</td><td>T6</td></tr>
+  <tr><td>7</td><td>Python baseline comparison data collected</td><td>T7</td></tr>
+</table>
+
+
+<h2>Post-Completion Comprehension</h2>
+
+<ol>
+  <li>Why does p99 latency matter more than average latency for evaluating a server?</li>
+  <li>Why would Conduit's req/sec plateau or decrease at very high concurrency levels?</li>
+  <li>What does valgrind's "still reachable" category mean, and why is it usually acceptable at exit?</li>
+  <li>Why do benchmarks over loopback produce unrealistically high req/sec numbers?</li>
+</ol>
+
+
+<h2>Project Complete</h2>
+
+<p>There is no TRD-08. Conduit is a finished HTTP/1.1 server with epoll I/O multiplexing, a thread pool, security hardening, honest benchmarks, and professional documentation. It demonstrates: POSIX socket programming, non-blocking I/O, Linux-specific APIs (epoll), concurrent systems design (pthreads), memory management in C, and the ability to measure and communicate technical results. This is the project to talk about in systems engineering interviews.</p>
+
+
+<div class="footer">
+  Conduit TRD-07 &nbsp;|&nbsp; Benchmarking &amp; Documentation &nbsp;|&nbsp; Final TRD &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

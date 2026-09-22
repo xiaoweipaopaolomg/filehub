@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-05 Hints: Progressive Guidance</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 24px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; }
+  h2 { font-size: 13pt; margin-top: 26px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  .level-box { border: 2px solid #000; padding: 12px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .level-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } .level-box { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-05 Hints</h1>
+  <div class="subtitle">Progressive Guidance — Conduit HTTP Server Project</div>
+  <div class="meta">Level 1 = nudge &nbsp;|&nbsp; Level 2 = stronger push &nbsp;|&nbsp; 15+ minutes before escalating</div>
+</div>
+
+
+<h2>H1 — Thread Pool Struct and Init (R1)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>The pool struct needs: an array of <code>pthread_t</code> thread IDs, a mutex, a condvar, a pointer to the task queue head/tail, a queue size counter, a shutdown flag, and the thread count. <code>threadpool_init()</code> initializes the mutex/condvar, sets shutdown to 0, and spawns N threads that all run the same worker function.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>typedef struct {
+    pthread_t *threads;
+    int thread_count;
+    task_node_t *queue_head;
+    task_node_t *queue_tail;
+    int queue_size;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int shutdown;
+} threadpool_t;
+
+threadpool_t *threadpool_init(int n) {
+    threadpool_t *pool = calloc(1, sizeof(threadpool_t));
+    pool-&gt;threads = malloc(sizeof(pthread_t) * n);
+    pool-&gt;thread_count = n;
+    pthread_mutex_init(&amp;pool-&gt;mutex, NULL);
+    pthread_cond_init(&amp;pool-&gt;cond, NULL);
+    for (int i = 0; i &lt; n; i++) {
+        pthread_create(&amp;pool-&gt;threads[i], NULL, worker_fn, pool);
+    }
+    return pool;
+}</pre>
+</div>
+
+
+<h2>H2 — Task Queue (R2)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>A singly linked list is simplest. Each node holds a <code>connection_t *</code> and a next pointer. Enqueue appends to the tail, dequeue removes from the head. Both operations must happen under the mutex. After enqueue, signal the condvar to wake one worker.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>typedef struct task_node {
+    connection_t *conn;
+    struct task_node *next;
+} task_node_t;
+
+void threadpool_enqueue(threadpool_t *pool, connection_t *conn) {
+    task_node_t *node = malloc(sizeof(task_node_t));
+    node-&gt;conn = conn;
+    node-&gt;next = NULL;
+
+    pthread_mutex_lock(&amp;pool-&gt;mutex);
+    if (pool-&gt;queue_tail) {
+        pool-&gt;queue_tail-&gt;next = node;
+    } else {
+        pool-&gt;queue_head = node;
+    }
+    pool-&gt;queue_tail = node;
+    pool-&gt;queue_size = pool-&gt;queue_size + 1;
+    pthread_cond_signal(&amp;pool-&gt;cond);
+    pthread_mutex_unlock(&amp;pool-&gt;mutex);
+}</pre>
+</div>
+
+
+<h2>H3 — Worker Thread Function (R3)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>The worker function takes the pool pointer as its argument. It loops forever: lock, wait on condvar while the queue is empty and shutdown is not set, dequeue a task, unlock, process the task. If shutdown is set and the queue is empty, the worker returns (exits the thread).</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void *worker_fn(void *arg) {
+    threadpool_t *pool = (threadpool_t *)arg;
+
+    while (1) {
+        pthread_mutex_lock(&amp;pool-&gt;mutex);
+
+        while (pool-&gt;queue_size == 0 &amp;&amp; !pool-&gt;shutdown) {
+            pthread_cond_wait(&amp;pool-&gt;cond, &amp;pool-&gt;mutex);
+        }
+
+        if (pool-&gt;shutdown &amp;&amp; pool-&gt;queue_size == 0) {
+            pthread_mutex_unlock(&amp;pool-&gt;mutex);
+            return NULL;
+        }
+
+        /* Dequeue */
+        task_node_t *node = pool-&gt;queue_head;
+        pool-&gt;queue_head = node-&gt;next;
+        if (!pool-&gt;queue_head) pool-&gt;queue_tail = NULL;
+        pool-&gt;queue_size = pool-&gt;queue_size - 1;
+
+        pthread_mutex_unlock(&amp;pool-&gt;mutex);
+
+        /* Process: parse request, serve file, send response */
+        process_request(node-&gt;conn);
+        close(node-&gt;conn-&gt;fd);
+        free(node-&gt;conn);
+        free(node);
+    }
+    return NULL;
+}</pre>
+  <p>Note: <code>process_request()</code> encapsulates TRD-01 parsing + TRD-02 file serving + TRD-03 response engine. The worker does everything after the raw bytes have been read.</p>
+</div>
+
+
+<h2>H4 — Graceful Shutdown (R6)</h2>
+
+<div class="level-box">
+  <div class="level-label">Level 1</div>
+  <p>Three steps in order: set the flag, wake everyone, wait for everyone. If you broadcast before setting the flag, workers wake up, see no flag, and go back to sleep. If you set the flag but don't broadcast, sleeping workers never check it.</p>
+</div>
+
+<div class="level-box">
+  <div class="level-label">Level 2</div>
+<pre>void threadpool_destroy(threadpool_t *pool) {
+    pthread_mutex_lock(&amp;pool-&gt;mutex);
+    pool-&gt;shutdown = 1;
+    pthread_cond_broadcast(&amp;pool-&gt;cond);
+    pthread_mutex_unlock(&amp;pool-&gt;mutex);
+
+    for (int i = 0; i &lt; pool-&gt;thread_count; i++) {
+        pthread_join(pool-&gt;threads[i], NULL);
+    }
+
+    /* Free any remaining queued tasks */
+    task_node_t *node = pool-&gt;queue_head;
+    while (node) {
+        task_node_t *next = node-&gt;next;
+        close(node-&gt;conn-&gt;fd);
+        free(node-&gt;conn);
+        free(node);
+        node = next;
+    }
+
+    pthread_mutex_destroy(&amp;pool-&gt;mutex);
+    pthread_cond_destroy(&amp;pool-&gt;cond);
+    free(pool-&gt;threads);
+    free(pool);
+}</pre>
+</div>
+
+
+<div class="callout">
+  <strong>Thread safety note for TRD-01 code:</strong> If the request parser uses <code>strtok()</code>, it will break under threading — <code>strtok()</code> uses global state. This is why the TRD-01 Prior Knowledge doc recommended <code>strtok_r()</code>. If <code>strtok()</code> was used, now is the time to replace it.
+</div>
+
+
+<div class="footer">
+  Conduit TRD-05 Hints &nbsp;|&nbsp; Thread Pool &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>

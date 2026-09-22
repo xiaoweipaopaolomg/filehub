@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRD-04 Prior Knowledge: Epoll Event Loop</title>
+<style>
+  @page { margin: 0.75in; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10.5pt; line-height: 1.55; color: #000; background: #fff;
+    max-width: 800px; margin: 0 auto; padding: 44px 34px;
+  }
+  .title-block { border-bottom: 3px solid #000; padding-bottom: 14px; margin-bottom: 28px; }
+  .title-block h1 { font-size: 22pt; margin-bottom: 2px; }
+  .title-block .subtitle { font-size: 10pt; font-style: italic; }
+  .title-block .meta { font-size: 8.5pt; margin-top: 6px; letter-spacing: 0.3px; }
+  h2 { font-size: 14pt; margin-top: 28px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1.5px solid #000; page-break-after: avoid; }
+  h3 { font-size: 11pt; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  p { margin-bottom: 8px; }
+  pre { border: 1.5px solid #000; padding: 10px 12px; margin: 10px 0; font-family: 'Courier New', monospace; font-size: 9pt; line-height: 1.45; background: #fff; color: #000; white-space: pre-wrap; word-wrap: break-word; }
+  code { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+  ul, ol { margin: 6px 0 8px 22px; }
+  li { margin-bottom: 3px; }
+  a { color: #000; text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; page-break-inside: avoid; }
+  th, td { border: 1px solid #000; padding: 5px 9px; text-align: left; font-size: 9.5pt; vertical-align: top; }
+  th { font-weight: bold; background: #f5f5f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .callout { border-left: 4px solid #000; padding: 8px 14px; margin: 12px 0; }
+  .diagram { border: 1.5px solid #000; padding: 14px; margin: 14px 0; text-align: center; page-break-inside: avoid; }
+  .diagram-caption { font-size: 8.5pt; font-style: italic; text-align: center; margin-top: 6px; }
+  .resource-box { border: 1.5px solid #000; padding: 10px 14px; margin: 10px 0; page-break-inside: avoid; }
+  .resource-label { font-weight: bold; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .footer { margin-top: 36px; padding-top: 8px; border-top: 2px solid #000; font-size: 8pt; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<div class="title-block">
+  <h1>TRD-04 Prior Knowledge</h1>
+  <div class="subtitle">Epoll Event Loop — Conduit HTTP Server Project</div>
+  <div class="meta">Prerequisite: TRD-03 complete (response engine) &nbsp;|&nbsp; ⚠ Hardest TRD in Conduit</div>
+</div>
+
+<p>This is the most difficult milestone. The concepts are simple in isolation — non-blocking I/O, event notification, state machines — but combining them correctly produces subtle bugs that only manifest under concurrency. Read this document thoroughly before coding. Come back to it when debugging.</p>
+
+
+<h2>1 &nbsp; What Survives vs. What Gets Replaced</h2>
+
+<p>TRD-04 is the largest structural change in Conduit. Before writing any epoll code, understand what you're keeping and what you're replacing:</p>
+
+<table>
+  <tr>
+    <th style="width:280px;">Keeps (unchanged)</th>
+    <th>Replaced</th>
+  </tr>
+  <tr>
+    <td>HTTP request parser (TRD-01) — <code>http_request_t</code>, parsing logic</td>
+    <td>The blocking <code>accept → read → write → close</code> loop in <code>main()</code></td>
+  </tr>
+  <tr>
+    <td>File serving logic (TRD-02) — path resolution, MIME types, <code>realpath()</code></td>
+    <td>Single global read/write buffers — each connection gets its own</td>
+  </tr>
+  <tr>
+    <td>Response engine (TRD-03) — <code>http_response_t</code>, <code>response_send()</code></td>
+    <td>Direct <code>read(fd)</code> / <code>write(fd)</code> calls — replaced by epoll-driven state machine</td>
+  </tr>
+  <tr>
+    <td>Socket setup — <code>socket()</code>, <code>bind()</code>, <code>listen()</code>, <code>SO_REUSEADDR</code></td>
+    <td>Blocking <code>accept()</code> — replaced by non-blocking accept-in-a-loop</td>
+  </tr>
+  <tr>
+    <td>CLI argument parsing, docroot validation</td>
+    <td></td>
+  </tr>
+</table>
+
+<p><strong>Practical approach:</strong> Start by adding the epoll setup and event loop around the existing code. Get a single connection working through the event loop first (accept → read → process → write → close, all event-driven). Then add multi-connection support. Don't try to make everything non-blocking and concurrent in one step.</p>
+
+
+<h2>2 &nbsp; Blocking vs. Non-Blocking I/O</h2>
+
+<p>Until now, every <code>read()</code> and <code>write()</code> in Conduit has been <strong>blocking</strong>: the call waits until data is available (read) or the kernel buffer accepts the data (write). With one connection at a time, this is fine. With many connections, it's fatal — the server stalls on one slow client while others wait.</p>
+
+<p><strong>Non-blocking I/O</strong> changes the contract: if a read or write <em>cannot complete immediately</em>, the call returns <code>-1</code> and sets <code>errno</code> to <code>EAGAIN</code> (or equivalently <code>EWOULDBLOCK</code>). The program is responsible for trying again later.</p>
+
+<p>Setting a socket to non-blocking:</p>
+<pre>int flags = fcntl(fd, F_GETFL, 0);
+fcntl(fd, F_SETFL, flags | O_NONBLOCK);</pre>
+
+<p>Every fd the server touches — the listen socket and every client connection — must be set to <code>O_NONBLOCK</code>.</p>
+
+
+<h2>3 &nbsp; The Epoll API</h2>
+
+<p>Epoll is Linux's mechanism for monitoring many file descriptors efficiently. It answers the question: "Which of my 500 open connections have data ready right now?"</p>
+
+<table>
+  <tr>
+    <th style="width:200px;">Function</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><code>epoll_create1(0)</code></td>
+    <td>Creates an epoll instance. Returns an fd that represents the epoll set.</td>
+  </tr>
+  <tr>
+    <td><code>epoll_ctl(epfd, op, fd, &amp;ev)</code></td>
+    <td>Modifies the interest set. <code>op</code> is <code>EPOLL_CTL_ADD</code>, <code>_MOD</code>, or <code>_DEL</code>. <code>ev</code> specifies which events to watch.</td>
+  </tr>
+  <tr>
+    <td><code>epoll_wait(epfd, events, max, timeout)</code></td>
+    <td>Blocks until at least one fd is ready. Returns the number of ready events. <code>timeout</code> is in milliseconds (-1 = block forever).</td>
+  </tr>
+</table>
+
+<h3>3.1 &nbsp; Event Flags</h3>
+<table>
+  <tr><th style="width:120px;">Flag</th><th>Meaning</th></tr>
+  <tr><td><code>EPOLLIN</code></td><td>Data available to read (or new connection on listen socket)</td></tr>
+  <tr><td><code>EPOLLOUT</code></td><td>Socket is writable (buffer space available for send)</td></tr>
+  <tr><td><code>EPOLLERR</code></td><td>Error condition on fd (always reported, no need to request)</td></tr>
+  <tr><td><code>EPOLLHUP</code></td><td>Hang-up / peer closed connection (always reported)</td></tr>
+  <tr><td><code>EPOLLET</code></td><td>Edge-triggered mode (see §4)</td></tr>
+</table>
+
+<h3>3.2 &nbsp; The Event Loop Pattern</h3>
+<pre>struct epoll_event events[MAX_EVENTS];
+while (1) {
+    int n = epoll_wait(epfd, events, MAX_EVENTS, -1);
+    for (int i = 0; i &lt; n; i++) {
+        if (events[i].data.fd == listen_fd) {
+            /* New connection(s) arriving */
+            handle_accept(epfd, listen_fd);
+        } else {
+            /* Existing connection has activity */
+            handle_connection(epfd, &amp;events[i]);
+        }
+    }
+}</pre>
+<p>This is the entire control flow of the server after TRD-04. There is no more accept-read-write-close loop. The event loop is the program.</p>
+
+
+<h2>4 &nbsp; Edge-Triggered vs. Level-Triggered</h2>
+
+<p>This is where most epoll bugs live.</p>
+
+<table>
+  <tr>
+    <th style="width:160px;">Mode</th>
+    <th>When epoll notifies</th>
+    <th>Implication</th>
+  </tr>
+  <tr>
+    <td><strong>Level-triggered</strong> (default)</td>
+    <td>Every <code>epoll_wait()</code> call, as long as the condition is true (data in buffer, space to write)</td>
+    <td>Simpler. If you don't read all data, you'll be notified again next loop.</td>
+  </tr>
+  <tr>
+    <td><strong>Edge-triggered</strong> (<code>EPOLLET</code>)</td>
+    <td>Once, when the condition <em>changes</em> (new data arrives, buffer transitions from full to not-full)</td>
+    <td>More efficient but dangerous. If you don't drain all data, you get <strong>no more notifications</strong>.</td>
+  </tr>
+</table>
+
+<div class="callout">
+  <strong>The edge-triggered contract:</strong> When epoll reports <code>EPOLLIN</code> in ET mode, you <strong>must</strong> call <code>read()</code> in a loop until it returns <code>EAGAIN</code>. If you read once and stop, any remaining data in the kernel buffer is invisible — epoll won't notify again because no <em>new</em> data arrived. The connection silently hangs. This is the single most common epoll bug.
+</div>
+
+<p>The same applies to <code>EPOLLOUT</code> + <code>write()</code>: write in a loop until <code>EAGAIN</code> or all data is sent.</p>
+
+<p><strong>Which mode to use:</strong> Edge-triggered is the standard choice for high-performance servers (nginx uses it). It requires more careful code but avoids redundant wakeups. Conduit should use edge-triggered.</p>
+
+
+<h2>5 &nbsp; The Per-Connection State Machine</h2>
+
+<div class="diagram">
+  <svg viewBox="0 0 680 150" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, serif" font-size="10">
+    <rect x="10" y="50" width="120" height="45" fill="none" stroke="#000" stroke-width="2"/>
+    <text x="70" y="70" text-anchor="middle" font-weight="bold">CONN_READING</text>
+    <text x="70" y="85" text-anchor="middle" font-size="8">accumulate request</text>
+
+    <rect x="190" y="50" width="140" height="45" fill="none" stroke="#000" stroke-width="2"/>
+    <text x="260" y="70" text-anchor="middle" font-weight="bold">CONN_WRITING</text>
+    <text x="260" y="85" text-anchor="middle" font-size="8">flush response buffer</text>
+
+    <rect x="395" y="50" width="100" height="45" fill="none" stroke="#000" stroke-width="2"/>
+    <text x="445" y="77" text-anchor="middle" font-weight="bold">CONN_DONE</text>
+
+    <!-- Arrows -->
+    <line x1="130" y1="72" x2="190" y2="72" stroke="#000" stroke-width="1.5" marker-end="url(#a4)"/>
+    <text x="160" y="64" text-anchor="middle" font-size="8" font-style="italic">\r\n\r\n</text>
+
+    <line x1="330" y1="72" x2="395" y2="72" stroke="#000" stroke-width="1.5" marker-end="url(#a4)"/>
+    <text x="362" y="64" text-anchor="middle" font-size="8" font-style="italic">all sent</text>
+
+    <!-- EAGAIN loop on write -->
+    <path d="M 260,95 Q 260,135 210,135 Q 190,135 190,95" fill="none" stroke="#000" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="225" y="130" text-anchor="middle" font-size="7" font-style="italic">EAGAIN → wait EPOLLOUT</text>
+
+    <!-- Accept -->
+    <line x1="70" y1="25" x2="70" y2="50" stroke="#000" stroke-width="1.5" marker-end="url(#a4)"/>
+    <text x="70" y="18" text-anchor="middle" font-size="8">accept()</text>
+
+    <!-- Close -->
+    <line x1="495" y1="72" x2="540" y2="72" stroke="#000" stroke-width="1.5" marker-end="url(#a4)"/>
+    <text x="550" y="77" text-anchor="middle" font-size="8">close(fd)</text>
+
+    <defs><marker id="a4" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#000"/></marker></defs>
+  </svg>
+  <div class="diagram-caption">Figure 1 — Per-connection state machine</div>
+</div>
+
+<p>Each active connection needs its own state. A typical struct:</p>
+
+<pre>typedef struct {
+    int fd;
+    int state;                /* CONN_READING, CONN_WRITING, CONN_DONE */
+    char read_buf[8192];
+    int read_len;             /* bytes accumulated so far */
+    char *write_buf;          /* serialized response (from response engine) */
+    int write_len;            /* total bytes to send */
+    int write_offset;         /* bytes sent so far */
+} connection_t;</pre>
+
+<p>The <code>write_offset</code> field is critical. <code>send()</code> on a non-blocking socket may write fewer bytes than requested. The offset tracks progress so the next <code>EPOLLOUT</code> event resumes from where it left off.</p>
+
+
+<h2>6 &nbsp; Accept Under Edge-Triggered Mode</h2>
+
+<p>When the listen socket gets <code>EPOLLIN</code> in ET mode, multiple connections may have arrived since the last notification. You must call <code>accept()</code> in a loop until it returns <code>EAGAIN</code>:</p>
+
+<pre>while (1) {
+    int client_fd = accept(listen_fd, NULL, NULL);
+    if (client_fd == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+        perror("accept");
+        break;
+    }
+    set_nonblocking(client_fd);
+    /* Register client_fd with epoll for EPOLLIN | EPOLLET */
+}</pre>
+
+<p>If you call <code>accept()</code> only once, any additional pending connections are lost until the next <code>EPOLLIN</code> — which in ET mode means the next <em>new</em> connection arrives.</p>
+
+
+<h2>7 &nbsp; Partial Writes</h2>
+
+<p>A non-blocking <code>send()</code>/<code>write()</code> may return fewer bytes than requested. This is normal — the kernel's send buffer is full. The pattern:</p>
+
+<ol>
+  <li>Attempt <code>send(fd, buf + offset, remaining, 0)</code></li>
+  <li>If it returns <code>n &gt; 0</code>: advance <code>offset += n</code>, reduce <code>remaining -= n</code></li>
+  <li>If it returns <code>-1</code> with <code>EAGAIN</code>: stop writing, register for <code>EPOLLOUT</code>, wait for next notification</li>
+  <li>If <code>offset == write_len</code>: done, transition to <code>CONN_DONE</code></li>
+</ol>
+
+<p>This is why the response engine from TRD-03 builds a complete buffer — epoll needs something to resume from.</p>
+
+
+<h2>8 &nbsp; Resources</h2>
+
+<div class="resource-box">
+  <div class="resource-label">Essential</div>
+  <ul>
+    <li><code>man 7 epoll</code> — <strong>Read the entire page.</strong> It's 3 pages and covers everything: API, ET vs LT, usage patterns, pitfalls. This is the single most important resource for TRD-04.</li>
+    <li><code>man 2 epoll_create1</code>, <code>man 2 epoll_ctl</code>, <code>man 2 epoll_wait</code></li>
+    <li><code>man 2 fcntl</code> — for setting <code>O_NONBLOCK</code></li>
+  </ul>
+</div>
+
+<div class="resource-box">
+  <div class="resource-label">Supplementary</div>
+  <ul>
+    <li><strong>Beej's Guide §7.2</strong> — <code>poll()</code> and the concept of I/O multiplexing (epoll is the Linux-specific evolution)</li>
+    <li><strong>The <code>epoll</code> man page "Suggested usage" section</strong> — essentially the algorithm for the event loop</li>
+    <li><code>man 2 accept4</code> — <code>accept4()</code> can set <code>SOCK_NONBLOCK</code> atomically, avoiding a separate <code>fcntl()</code> call</li>
+  </ul>
+</div>
+
+
+<div class="footer">
+  Conduit TRD-04 Prior Knowledge &nbsp;|&nbsp; Epoll Event Loop &nbsp;|&nbsp; April 2026
+</div>
+
+</body>
+</html>
