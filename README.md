@@ -4,7 +4,7 @@ FileHub 是一个使用 C11 编写的 Linux HTTP/1.1 静态文件分发服务，
 
 项目支持 HTTP Keep-Alive、请求分片、流水线请求、断点下载、慢客户端处理、运行指标、配置热加载和 systemd 部署，并包含功能、稳定性、性能与资源释放测试。
 
-> 项目来源说明：本项目以教育项目 [packageIncoming/conduit](https://github.com/packageIncoming/conduit) 为学习基础，在其上重新设计并实现了连接状态机、非阻塞发送、线程池完成队列、超时管理、Range 下载、安全路径访问、可观测性、测试体系和部署方案。发布衍生仓库前，请确认上游项目的许可与再分发要求。
+
 
 ## 核心特性
 
